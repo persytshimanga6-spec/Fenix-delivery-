@@ -191,6 +191,8 @@ function CREATE_NOTIF() {
   );
   CREATE INDEX IF NOT EXISTS idx_notif_merchant ON notifications(merchant_id, id);`);
 }
+// Type de chauffeur : salarie (payé au salaire) | independant (sa moto, son essence). Chacun a son taux de part.
+addColumn('users', 'driver_kind', "TEXT NOT NULL DEFAULT 'salarie'");
 addColumn('communes', 'lat', 'REAL');
 addColumn('communes', 'lng', 'REAL');
 addColumn('merchants', 'email', 'TEXT');
@@ -203,7 +205,7 @@ addColumn('shipments', 'payment_ref', 'TEXT');
 addColumn('shipments', 'paid_at', 'TEXT');
 // Anciens réglages du prix par zone et du supplément dynamique : retirés.
 db.exec(`DELETE FROM settings WHERE key IN ('pricing_mode','km_fc','surge_on','busy_score','very_busy_score','busy_pct',
-  'very_busy_pct','traffic_hours','traffic_pct','surge_max_pct','cod_fee_pct')`);
+  'very_busy_pct','traffic_hours','traffic_pct','surge_max_pct','cod_fee_pct','driver_share_pct')`);
 addColumn('shipments', 'sender_email', 'TEXT');
 
 export const setting = (key, fallback = null) => {

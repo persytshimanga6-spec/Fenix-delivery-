@@ -29,7 +29,9 @@ const SETTINGS = {
   express_supplement_fc: '5000',
   retry_fee_fc: '3000',      // deuxième tentative ou retour
   insurance_pct: '1',        // % de la valeur déclarée
-  driver_share_pct: '60',    // part du livreur sur le prix du port
+  // Part du livreur sur le prix de la livraison, selon son type (réglable dans Tarifs et réglages).
+  driver_share_salarie_pct: '0',      // salarié : payé au salaire, pas à la commission
+  driver_share_independant_pct: '0',  // indépendant : taux à fixer plus tard
   relay_commission_pct: '10',
   // Prix calculé pour chaque trajet : prise en charge + carburant + temps de trajet.
   base_petit_fc: '3000', base_moyen_fc: '4000', base_grand_fc: '6000',

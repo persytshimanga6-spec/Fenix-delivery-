@@ -10,6 +10,7 @@ dlg.addEventListener('click', (e) => { if (e.target.closest('[data-close]') || e
 const driverOptions = (sel) => `<option value="">Choisir un livreur</option>` + drivers.map((d) => `<option value="${d.id}" ${d.id === sel ? 'selected' : ''}>${esc(d.name)}${d.zone ? ' · ' + esc(d.zone) : ''}</option>`).join('');
 const AGENCY_KIND = { agence: 'Agence', relais: 'Point relais', franchise: 'Franchise' };
 
+const KIND = { salarie: 'Salarié', independant: 'Indépendant' };
 const pages = {
   // ---------------- Tableau de bord ----------------
   async dashboard() {
@@ -107,15 +108,16 @@ const pages = {
     view.innerHTML = `<div class="stack"><h1>Livreurs et équipe</h1>
       <div class="card scroll"><h2>Candidatures de livreurs en attente (${apps.length})</h2>
         <p class="muted small" style="margin:0 0 8px">Reçues par « Devenir livreur — Postuler ». Un livreur ne peut se connecter qu'une fois validé.</p>
-        <table><thead><tr><th>Nom complet</th><th>Contact</th><th>Adresse</th><th>Naissance</th><th>Permis</th><th>Expérience</th><th>Handicap</th><th>Crime déclaré</th><th>Secteur</th><th></th></tr></thead><tbody>
+        <table><thead><tr><th>Nom complet</th><th>Contact</th><th>Adresse</th><th>Naissance</th><th>Permis</th><th>Expérience</th><th>Type</th><th>Handicap</th><th>Crime déclaré</th><th>Secteur</th><th></th></tr></thead><tbody>
         ${apps.map((p) => `<tr><td><strong>${esc(p.full_name)}</strong><div class="tiny muted">Nom ${esc(p.last_name)} · Post-nom ${esc(p.post_name)} · Prénom ${esc(p.first_name)}</div><div class="tiny muted">${when(p.created_at)}</div></td>
           <td>${esc(p.phone)}<div class="tiny muted">${esc(p.email)}</div></td><td class="small">${esc(p.address)}</td>
           <td>${p.birth_year}<div class="tiny muted">${new Date().getFullYear() - p.birth_year} ans</div></td><td>${esc(p.license_no)}</td>
           <td>${p.experience_years >= 5 ? '5 ans ou plus' : `${p.experience_years} ans`}</td>
+          <td>${KIND[p.driver_kind] || ''}</td>
           <td>${yn(p.disability)}${p.disability_note ? `<div class="tiny muted">${esc(p.disability_note)}</div>` : ''}</td><td>${yn(p.criminal_record)}</td>
           <td>${zoneSel('zone', `data-zone-for="${p.user_id}"`)}</td>
           <td class="row" style="gap:6px"><button class="primary" data-decide="${p.user_id}" data-d="valide">Valider</button><button data-decide="${p.user_id}" data-d="refuse">Refuser</button></td></tr>`).join('')
-          || '<tr><td colspan="10" class="muted">Aucune candidature en attente.</td></tr>'}
+          || '<tr><td colspan="11" class="muted">Aucune candidature en attente.</td></tr>'}
         </tbody></table></div>
 
       <form id="add" class="card stack">
@@ -135,13 +137,15 @@ const pages = {
           <label class="f">Handicap<select name="disability"><option value="">—</option><option value="non">Non</option><option value="oui">Oui</option></select></label>
           <label class="f">Précision (si handicap)<input name="disability_note"></label>
           <label class="f">Crime déclaré<select name="criminal_record"><option value="">—</option><option value="non">Non</option><option value="oui">Oui</option></select></label>
+          <label class="f">Type de chauffeur<select name="driver_kind"><option value="salarie">Salarié (payé au salaire)</option><option value="independant">Indépendant (sa moto, son essence)</option></select></label>
           <label class="f">Secteur${zoneSel('zone')}</label>
         </div>
         <button class="primary">Ajouter</button>
       </form>
 
       <div class="card scroll"><table><thead><tr><th>Nom</th><th>Rôle</th><th>Téléphone</th><th>Secteur / agence</th><th>Permis</th><th>Expérience</th><th>État</th><th></th></tr></thead><tbody>
-      ${users.map((u) => `<tr><td>${esc(u.name)}</td><td>${esc(u.role)}</td><td>${esc(u.phone)}</td><td>${esc(u.zone || u.agency_name || '—')}</td>
+      ${users.map((u) => `<tr><td>${esc(u.name)}${u.role === 'livreur' ? `<div><select data-kind="${u.id}" class="small" style="padding:2px 6px;margin-top:4px">
+          <option value="salarie" ${u.driver_kind !== 'independant' ? 'selected' : ''}>Salarié</option><option value="independant" ${u.driver_kind === 'independant' ? 'selected' : ''}>Indépendant</option></select></div>` : ''}</td><td>${esc(u.role)}</td><td>${esc(u.phone)}</td><td>${esc(u.zone || u.agency_name || '—')}</td>
         <td>${esc(u.license_no || '—')}</td><td>${u.experience_years == null ? '—' : u.experience_years >= 5 ? '5 ans ou plus' : `${u.experience_years} ans`}</td>
         <td>${u.application_status === 'refuse' ? badge('suspendu', 'Refusé') : u.active ? badge('actif', 'Actif') : badge('suspendu', 'Désactivé')}</td>
         <td class="row" style="gap:6px">${u.application_status === 'refuse' ? '' : `<button data-toggle="${u.id}" data-active="${u.active}">${u.active ? 'Désactiver' : 'Réactiver'}</button>`}<button data-pass="${u.id}">Nouveau mot de passe</button></td></tr>`).join('')}
@@ -152,6 +156,11 @@ const pages = {
       $$('#add .staff').forEach((x) => x.classList.toggle('hidden', role() === 'livreur'));
     };
     $('#addRole').onchange = sync; sync();
+    view.onchange = run(async (e) => {
+      const k = e.target.closest('[data-kind]'); if (!k) return;
+      await api(`/api/admin/users/${k.dataset.kind}`, { method: 'PATCH', body: { driver_kind: k.value } });
+      toast(`Type changé : ${KIND[k.value]}`);
+    });
     $('#add').onsubmit = run(async (e) => {
       e.preventDefault();
       const f = Object.fromEntries(new FormData(e.target));
@@ -209,8 +218,8 @@ const pages = {
         <td><input type="number" min="0" step="100" value="${o.cash_fc}" id="g-${o.holder_type}-${o.holder_id}" style="width:140px"></td>
         <td><button class="blue" data-close-cash="${o.holder_type}:${o.holder_id}">Valider la remise</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Tout est remis.</td></tr>'}
       </tbody></table></div>
-      <div class="card scroll"><h2>Part des livreurs aujourd'hui</h2><table><thead><tr><th>Livreur</th><th>Livrés</th><th>Prix des livraisons</th><th>Part du livreur</th></tr></thead><tbody>
-      ${c.drivers.map((d) => `<tr><td>${esc(d.name)}</td><td>${d.delivered}</td><td>${fc(d.port_fc)}</td><td><strong>${fc(d.share_fc)}</strong></td></tr>`).join('')}
+      <div class="card scroll"><h2>Part des livreurs aujourd'hui</h2><table><thead><tr><th>Livreur</th><th>Type</th><th>Livrés</th><th>Prix des livraisons</th><th>Part du livreur</th></tr></thead><tbody>
+      ${c.drivers.map((d) => `<tr><td>${esc(d.name)}</td><td>${KIND[d.driver_kind] || ''} · ${d.share_pct} %</td><td>${d.delivered}</td><td>${fc(d.port_fc)}</td><td><strong>${fc(d.share_fc)}</strong></td></tr>`).join('')}
       </tbody></table></div>
       <div class="card scroll"><h2>Remises validées aujourd'hui</h2><table><thead><tr><th>Qui</th><th>Attendu</th><th>Rendu</th><th>Écart</th><th>Mobile Money</th><th>Note</th></tr></thead><tbody>
       ${c.closings.map((x) => `<tr><td>${esc(x.name)}</td><td>${fc(x.expected_cash_fc)}</td><td>${fc(x.given_cash_fc)}</td>
@@ -354,7 +363,8 @@ const pages = {
         <label class="f">Supplément express (FC)<input name="express_supplement_fc" type="number" value="${esc(S.express_supplement_fc)}"></label>
         <label class="f">Assurance (% de la valeur)<input name="insurance_pct" type="number" step="0.1" value="${esc(S.insurance_pct)}"></label>
         <label class="f">Deuxième tentative / retour (FC)<input name="retry_fee_fc" type="number" value="${esc(S.retry_fee_fc)}"></label>
-        <label class="f">Part du livreur (% du prix)<input name="driver_share_pct" type="number" value="${esc(S.driver_share_pct)}"></label>
+        <label class="f">Part du livreur salarié (% du prix)<input name="driver_share_salarie_pct" type="number" min="0" max="100" value="${esc(S.driver_share_salarie_pct ?? 0)}"></label>
+        <label class="f">Part du livreur indépendant (% du prix)<input name="driver_share_independant_pct" type="number" min="0" max="100" value="${esc(S.driver_share_independant_pct ?? 0)}"></label>
         <label class="f">Commission point relais (%)<input name="relay_commission_pct" type="number" value="${esc(S.relay_commission_pct)}"></label>
       </div>
       <div class="card stack"><h2>Secteurs des communes</h2><p class="muted small" style="margin:0">Servent au tri des colis au dépôt (étagères), pas au prix.</p>

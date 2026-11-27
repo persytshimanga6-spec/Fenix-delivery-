@@ -343,8 +343,8 @@ try {
     const y = new Date().getFullYear();
     const form = { last_name: 'Kabongo', post_name: 'Mutombo', first_name: 'Didier', phone: '0821234567', password: 'route123',
       address: 'Lemba, av. Kianza 12', birth_year: y - 25, email: 'didier@exemple.com', license_no: 'KIN-B-445566',
-      disability: 'non', criminal_record: 'non', experience_years: 3 };
-    for (const k of Object.keys(form)) {
+      disability: 'non', criminal_record: 'non', experience_years: 3, driver_kind: 'independant' };
+    for (const k of Object.keys(form).filter((k) => k !== 'driver_kind')) {
       const { [k]: _, ...missing } = form;
       assert.equal((await pub.call('POST', '/api/drivers/apply', missing)).status, 400, `champ obligatoire : ${k}`);
     }
@@ -376,6 +376,25 @@ try {
     assert.equal((await admin.call('POST', '/api/admin/users', { role: 'livreur', phone: '0829990000', password: 'route123' })).status, 400);
     await admin.ok('POST', '/api/admin/users', { ...form, role: 'livreur', phone: '0829990000', zone: 'Tshangu' });
     await client().login('0829990000', 'route123');
+  });
+  await step('part des livreurs : taux selon le type (salarié / indépendant)', async () => {
+    const users = await admin.ok('GET', '/api/admin/users');
+    assert.ok(users.filter((u) => u.role === 'livreur').every((u) => ['salarie', 'independant'].includes(u.driver_kind)));
+    assert.equal(users.find((u) => u.id === jk.id).driver_kind, 'salarie'); // existants : salariés
+    assert.equal(users.find((u) => u.phone === '0821234567').driver_kind, 'independant'); // choisi dans la candidature
+    let c = await admin.ok('GET', '/api/admin/cash');
+    const jkRow = () => c.drivers.find((d) => d.id === jk.id);
+    assert.ok(jkRow().port_fc > 0);
+    assert.ok(c.drivers.every((d) => d.share_fc === 0), 'les deux taux sont à 0 % au départ');
+    assert.equal((await admin.call('PATCH', `/api/admin/users/${jk.id}`, { driver_kind: 'autre' })).status, 400);
+    await admin.ok('PATCH', `/api/admin/users/${jk.id}`, { driver_kind: 'independant' });
+    await admin.ok('PUT', '/api/admin/rates', { settings: { driver_share_independant_pct: 40, driver_share_salarie_pct: 0 } });
+    c = await admin.ok('GET', '/api/admin/cash');
+    assert.equal(jkRow().share_fc, Math.round(jkRow().port_fc * 0.4)); // effet immédiat, taux indépendant
+    const sal = c.drivers.find((d) => d.driver_kind === 'salarie' && d.port_fc > 0);
+    if (sal) assert.equal(sal.share_fc, 0);
+    await admin.ok('PUT', '/api/admin/rates', { settings: { driver_share_independant_pct: 0 } });
+    await admin.ok('PATCH', `/api/admin/users/${jk.id}`, { driver_kind: 'salarie' });
   });
   await step('mon compte admin : mot de passe et numéro', async () => {
     assert.equal((await admin.call('POST', '/api/me/password', { current: 'faux', password: 'nouveau123' })).status, 400);

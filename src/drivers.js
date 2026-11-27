@@ -32,8 +32,10 @@ export function checkDriverForm(b) {
     last_name: txt(b.last_name, 60), post_name: txt(b.post_name, 60), first_name: txt(b.first_name, 60),
     phone: normPhone(b.phone), password: String(b.password || ''), address: txt(b.address, 300),
     birth_year: Number(b.birth_year), email: txt(b.email, 120).toLowerCase(), license_no: txt(b.license_no, 40),
-    experience_years: Number(b.experience_years)
+    experience_years: Number(b.experience_years),
+    driver_kind: b.driver_kind || 'salarie'
   };
+  if (!['salarie', 'independant'].includes(p.driver_kind)) fail(400, 'Type de chauffeur : salarié ou indépendant');
   for (const [k, l] of [['last_name', 'Nom'], ['post_name', 'Post-nom'], ['first_name', 'Prénom'], ['phone', 'Téléphone'],
     ['address', 'Adresse'], ['email', 'E-mail'], ['license_no', 'Numéro du permis de conduire']]) {
     if (!p[k]) fail(400, `${l} obligatoire`);
@@ -58,8 +60,8 @@ export function checkDriverForm(b) {
 export function createDriver(b, { validated = false, by = null, zone = null } = {}) {
   const p = checkDriverForm(b);
   return tx(() => {
-    const id = db.prepare(`INSERT INTO users (role, name, phone, password_hash, zone, active) VALUES ('livreur', ?, ?, ?, ?, ?)`)
-      .run(fullName(p), p.phone, hash(p.password), zone || null, validated ? 1 : 0).lastInsertRowid;
+    const id = db.prepare(`INSERT INTO users (role, name, phone, password_hash, zone, active, driver_kind) VALUES ('livreur', ?, ?, ?, ?, ?, ?)`)
+      .run(fullName(p), p.phone, hash(p.password), zone || null, validated ? 1 : 0, p.driver_kind).lastInsertRowid;
     db.prepare(`INSERT INTO driver_profiles (user_id, last_name, post_name, first_name, address, birth_year, email, license_no,
       disability, disability_note, criminal_record, experience_years, status, decided_by, decided_at)
       VALUES (@id, @last_name, @post_name, @first_name, @address, @birth_year, @email, @license_no,

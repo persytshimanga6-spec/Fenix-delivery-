@@ -318,6 +318,30 @@ const pages = {
     });
   },
 
+  async compte() {
+    const { user } = await api('/api/me');
+    view.innerHTML = `<div class="stack" style="max-width:560px"><h1>Mon compte</h1>
+      <form id="meInfo" class="card stack"><div class="label">Connexion</div>
+        <label class="f">Nom<input name="name" value="${esc(user.name || '')}"></label>
+        <label class="f">Numéro de téléphone (sert à se connecter)<input name="phone" type="tel" value="${esc(user.phone)}"></label>
+        <button class="primary">Enregistrer</button></form>
+      <form id="mePass" class="card stack"><div class="label">Changer le mot de passe</div>
+        <label class="f">Mot de passe actuel<input name="current" type="password" required autocomplete="current-password"></label>
+        <label class="f">Nouveau mot de passe (6 caractères minimum)<input name="password" type="password" minlength="6" required autocomplete="new-password"></label>
+        <label class="f">Répéter le nouveau mot de passe<input name="again" type="password" minlength="6" required autocomplete="new-password"></label>
+        <button class="primary">Changer le mot de passe</button></form></div>`;
+    $('#meInfo').onsubmit = run(async (e) => {
+      e.preventDefault(); const f = new FormData(e.target);
+      await api('/api/me', { method: 'PATCH', body: { name: f.get('name'), phone: f.get('phone') } });
+      toast('Enregistré. Utilisez ce numéro à la prochaine connexion.');
+    });
+    $('#mePass').onsubmit = run(async (e) => {
+      e.preventDefault(); const f = new FormData(e.target);
+      if (f.get('password') !== f.get('again')) { toast('Les deux nouveaux mots de passe ne sont pas pareils'); return; }
+      await api('/api/me/password', { method: 'POST', body: { current: f.get('current'), password: f.get('password') } });
+      e.target.reset(); toast('Mot de passe changé');
+    });
+  },
   async sms() {
     const rows = await api('/api/admin/notifications');
     const st = { envoye: 'Envoyé', enregistre: 'Enregistré', envoi: 'En cours', echec: 'Échec' };

@@ -1,4 +1,5 @@
 import express from 'express';
+import bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import path from 'node:path';
 import QRCode from 'qrcode';
@@ -60,8 +61,22 @@ api.post('/login', (req, res) => {
 });
 api.post('/logout', (_req, res) => { res.clearCookie('kc'); res.json({ ok: true }); });
 api.get('/me', need(), (req, res) => res.json({ user: publicUser(req.user) }));
+// Mon compte : changer son nom et son numéro de connexion.
+api.patch('/me', need(), (req, res) => {
+  const b = req.body;
+  if (b.phone) {
+    const phone = normPhone(b.phone);
+    if (!/^\+?\d{9,13}$/.test(phone)) fail(400, 'Numéro invalide (ex. 0812345678)');
+    if (db.prepare('SELECT 1 FROM users WHERE phone = ? AND id != ?').get(phone, req.user.id)) fail(409, 'Ce numéro a déjà un compte');
+    db.prepare('UPDATE users SET phone = ? WHERE id = ?').run(phone, req.user.id);
+  }
+  if (b.name && String(b.name).trim()) db.prepare('UPDATE users SET name = ? WHERE id = ?').run(String(b.name).trim().slice(0, 80), req.user.id);
+  res.json({ user: publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id)) });
+});
 api.post('/me/password', need(), (req, res) => {
-  const { password } = req.body;
+  const { password, current } = req.body;
+  const me = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.user.id);
+  if (current !== undefined && !bcrypt.compareSync(String(current), me.password_hash)) fail(400, 'Mot de passe actuel incorrect');
   if (!password || String(password).length < 6) fail(400, 'Mot de passe : 6 caractères minimum');
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash(password), req.user.id);
   res.json({ ok: true });

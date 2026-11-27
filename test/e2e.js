@@ -273,6 +273,13 @@ try {
     assert.equal((await pub.call('GET', '/api/heatmap')).status, 401);
     await admin.ok('PUT', '/api/admin/rates', { settings: { pricing_mode: 'zone', surge_on: '0', traffic_hours: '6-9,16-19' } });
   });
+  await step('mon compte admin : mot de passe et numéro', async () => {
+    assert.equal((await admin.call('POST', '/api/me/password', { current: 'faux', password: 'nouveau123' })).status, 400);
+    await admin.ok('POST', '/api/me/password', { current: 'admin123', password: 'nouveau123' });
+    await admin.ok('PATCH', '/api/me', { phone: '0899111222', name: 'Persy' });
+    const again = client(); await again.login('0899111222', 'nouveau123');
+    assert.equal((await admin.call('PATCH', '/api/me', { phone: '0820000001' })).status, 409);
+  });
   await step('tableau de bord et rapport', async () => {
     const d = await admin.ok('GET', '/api/admin/dashboard');
     assert.equal(d.delivered_today, 3);

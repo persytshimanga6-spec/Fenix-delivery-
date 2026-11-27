@@ -16,7 +16,10 @@ input,select{background:var(--night);border-color:#53412D;color:#F5EDE2}
 .pill{background:var(--night);color:#F5EDE2;border-color:#53412D}.pill[aria-pressed=true]{background:var(--orange);border-color:var(--orange);color:var(--blue-dark)}
 button.blue,.btn.blue{background:var(--night3);border-color:var(--orange);color:#F5EDE2}
 .bar{height:6px;background:var(--night2)}.bar div{height:6px;background:var(--orange)}
-header.d{padding:14px 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--night2)}
+/* Marge de la barre de statut du téléphone (heure, batterie) : env() dans le navigateur et la WebView récente,
+   --safe-area-inset-top injecté par l'appli Android (Capacitor) ; 0 quand il n'y en a pas besoin. */
+:root{--sat:max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px))}
+header.d{padding:calc(14px + var(--sat)) 16px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--night2)}
 .due{color:#F4B683;font-weight:700}
 .repere{color:#F4B683}
 #scanBox{background:#000;border-radius:14px;overflow:hidden}
@@ -25,7 +28,7 @@ header.d{padding:14px 16px;display:flex;justify-content:space-between;align-item
 </style>
 </head>
 <body>
-<div id="login" class="narrow hidden"><div class="card stack" style="margin-top:40px">
+<div id="login" class="narrow hidden"><div class="card stack" style="margin-top:calc(40px + var(--sat))">
   <h1>Appli livreur</h1>
   <form class="stack"><label class="f" style="color:#E5D6C2">Téléphone<input name="phone" type="tel" autocomplete="username" required></label>
   <label class="f" style="color:#E5D6C2">Mot de passe<input name="password" type="password" autocomplete="current-password" required></label>
@@ -33,7 +36,7 @@ header.d{padding:14px 16px;display:flex;justify-content:space-between;align-item
   <p class="small" style="margin:0;text-align:center">Pas encore livreur ? <a href="#postuler" id="toApply" style="color:#F4B683;font-weight:700">Devenir livreur — Postuler</a></p>
 </div></div>
 
-<div id="apply" class="narrow hidden"><div class="card stack" style="margin-top:24px">
+<div id="apply" class="narrow hidden"><div class="card stack" style="margin-top:calc(24px + var(--sat))">
   <h1 style="margin:0">Postuler comme livreur</h1>
   <p class="small muted" style="margin:0">Tous les champs sont obligatoires. Le bureau vérifie votre candidature, puis vous pourrez vous connecter.</p>
   <form id="applyForm" class="stack">

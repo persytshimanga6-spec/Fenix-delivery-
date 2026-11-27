@@ -49,7 +49,6 @@ export function quote(d) {
   const lines = [...p.lines];
   if (express) lines.push({ label: 'Express (moins de 2 h)', fc: Number(setting('express_supplement_fc', 0)) });
   if (insured && declared_value_fc > 0) lines.push({ label: 'Assurance', fc: Math.ceil(declared_value_fc * Number(setting('insurance_pct', 0)) / 100) });
-  if (cod_amount_fc > 0) lines.push({ label: 'Encaissement pour le commerçant', fc: Math.ceil(cod_amount_fc * Number(setting('cod_fee_pct', 0)) / 100) });
   const price_fc = lines.reduce((s, l) => s + (l.fc || 0), 0);
   return { zone, lines, price_fc, distance_km: p.distance_km, minutes: p.minutes, rush: p.rush };
 }

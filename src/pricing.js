@@ -44,7 +44,7 @@ export function rushHour(now = new Date()) {
   });
 }
 
-/** Prix de la course (sans express, assurance, encaissement), ligne par ligne. */
+/** Prix de la course (sans express ni assurance), ligne par ligne. */
 export function deliveryPrice(d) {
   const { from, to } = points(d);
   if (!from || !to) fail(400, 'Position de départ ou d’arrivée inconnue');

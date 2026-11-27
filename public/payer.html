@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Payer mon colis – Fenix Delivery</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <a href="/" class="brand" style="font-size:22px"><span>Fenix<em>Delivery</em></span></a>
+  <nav><a href="/suivi">Suivre un colis</a></nav>
+</div></header>
+<main class="wrap stack" style="max-width:560px;gap:16px">
+  <h1 style="margin:0">Payer mon colis</h1>
+  <form id="find" class="row card">
+    <input id="n" placeholder="Numéro de suivi, ex. FX-1124-000123" required style="flex:1;min-width:200px">
+    <button class="primary">Afficher</button>
+  </form>
+  <div id="out" class="stack"></div>
+</main>
+<script type="module">
+import { $, api, esc, fc, pills, run, PAY } from '/assets/app.js';
+const n = new URLSearchParams(location.search).get('n');
+let method = 'mpesa';
+
+const show = run(async (t) => {
+  const p = await api('/api/pay/' + encodeURIComponent(t));
+  if (p.status !== 'en_attente') {
+    $('#out').innerHTML = `<div class="card"><strong>${esc(p.tracking)}</strong> : ce colis est déjà payé. <a href="/suivi?n=${encodeURIComponent(p.tracking)}">Suivre le colis</a></div>`;
+    return;
+  }
+  $('#out').innerHTML = `
+    <div class="card stack">
+      <div class="eyebrow">Colis ${esc(p.tracking)} · de ${esc(p.from)}</div>
+      ${p.delivery_fc ? `<div class="spread"><span>Livraison</span><span>${fc(p.delivery_fc)}</span></div>` : ''}
+      ${p.goods_fc ? `<div class="spread"><span>Marchandise (reversée en entier au vendeur)</span><span>${fc(p.goods_fc)}</span></div>` : ''}
+      <div class="spread"><strong>À payer avant l'envoi</strong><strong style="font-size:22px">${fc(p.total_fc)}</strong></div>
+    </div>
+    ${p.ref_sent ? '<p class="small" style="margin:0;color:#F4B683">Une référence a déjà été envoyée : elle est en cours de vérification. Vous pouvez la corriger ci-dessous.</p>' : ''}
+    <form id="pay" class="card stack">
+      <div class="label">Moyen de paiement</div>
+      <div class="pills" id="methods"></div>
+      <p class="small" id="hint" style="margin:0"></p>
+      <label class="f">Votre numéro de téléphone (celui qui reçoit le colis)<input name="phone" type="tel" required></label>
+      <label class="f">Référence de la transaction<input name="payment_ref" required autocomplete="off" placeholder="Référence reçue par SMS"></label>
+      <button class="primary big">Envoyer la référence</button>
+      <p class="tiny muted" style="margin:0">Le colis part dès que le paiement est vérifié. Vous recevrez un SMS.</p>
+    </form>`;
+  const hint = () => {
+    const nb = p.momo?.[method];
+    $('#hint').innerHTML = `1. Envoyez <strong>${fc(p.total_fc)}</strong> par ${esc(PAY[method])}${nb ? ` au <strong>${esc(nb)}</strong>` : ''}.<br>2. Entrez la référence reçue par SMS.`;
+  };
+  pills($('#methods'), [['mpesa', 'M-Pesa'], ['airtel', 'Airtel Money'], ['orange', 'Orange Money']], method, (v) => { method = v; hint(); });
+  hint();
+  $('#pay').onsubmit = run(async (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target));
+    await api('/api/pay/' + encodeURIComponent(p.tracking), { method: 'POST', body: { ...f, pay_method: method } });
+    $('#out').innerHTML = `<div class="card stack"><strong>Merci !</strong><p style="margin:0">Votre référence est enregistrée. Nous vérifions le paiement, puis votre colis part. Vous recevrez un SMS.</p>
+      <a class="btn primary" href="/suivi?n=${encodeURIComponent(p.tracking)}">Suivre le colis</a></div>`;
+  });
+});
+$('#find').onsubmit = (e) => { e.preventDefault(); show($('#n').value.trim()); };
+if (n) { $('#n').value = n; show(n); }
+</script>
+</body>
+</html>

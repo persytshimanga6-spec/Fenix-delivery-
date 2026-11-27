@@ -52,8 +52,16 @@ export async function createShipment(input, actor, ctx = {}) {
       sender_name: m.name, sender_phone: m.phone, sender_email: m.email || null, from_commune: m.commune, from_landmark: m.landmark,
       from_lat: m.lat, from_lng: m.lng
     });
-    if (!['compte', ...MOBILE].includes(d.pay_method)) fail(400, 'Paiement : sur votre compte ou par Mobile Money');
-    if (MOBILE.includes(d.pay_method) && (!d.payment_ref || d.payment_ref.length < 4)) fail(400, 'Entrez la référence de la transaction Mobile Money');
+    if (d.cod_amount_fc > 0) {
+      // Avec une marchandise : le client paie TOUT avant le départ (livraison + marchandise), par Mobile Money.
+      // Il reçoit un lien pour payer ; le commerçant peut aussi entrer la référence si le client a déjà payé.
+      if (d.pay_method === 'compte') fail(400, 'Avec une marchandise, le client paie l’envoi et la marchandise avant le départ');
+      if (!MOBILE.includes(d.pay_method)) d.pay_method = 'mpesa';
+      if (d.payment_ref && d.payment_ref.length < 4) fail(400, 'Référence Mobile Money trop courte');
+    } else {
+      if (!['compte', ...MOBILE].includes(d.pay_method)) fail(400, 'Paiement : sur votre compte ou par Mobile Money');
+      if (MOBILE.includes(d.pay_method) && (!d.payment_ref || d.payment_ref.length < 4)) fail(400, 'Entrez la référence de la transaction Mobile Money');
+    }
     d.merchant_id = m.id;
   } else if (ctx.public) {
     d.merchant_id = null;
@@ -77,6 +85,7 @@ export async function createShipment(input, actor, ctx = {}) {
     if (!d.from_landmark) d.from_landmark = ctx.agency.name;
     if (d.from_lat == null) { d.from_lat = ctx.agency.lat; d.from_lng = ctx.agency.lng; }
     if (d.pay_method === 'compte' && !d.merchant_id) fail(400, 'Au comptoir : espèces ou Mobile Money');
+    if (d.pay_method === 'compte' && d.cod_amount_fc > 0) fail(400, 'Avec une marchandise, le client paie l’envoi et la marchandise avant le départ');
   } else if (d.pay_method === 'compte' && !d.merchant_id) {
     fail(400, 'Le paiement « sur compte » est réservé aux commerçants');
   }
@@ -118,8 +127,9 @@ export async function createShipment(input, actor, ctx = {}) {
       db.prepare("UPDATE shipments SET status = 'en_agence' WHERE id = ?").run(sid);
       addEvent(sid, 'en_agence', actor.id, ctx.agency.name);
       if (paidNow) {
-        db.prepare(`INSERT INTO cash (holder_type, holder_id, shipment_id, kind, method, amount_fc)
-          VALUES ('agence', ?, ?, 'port', ?, ?)`).run(ctx.agency.id, sid, d.pay_method, q.price_fc);
+        const ins = db.prepare(`INSERT INTO cash (holder_type, holder_id, shipment_id, kind, method, amount_fc) VALUES ('agence', ?, ?, ?, ?, ?)`);
+        ins.run(ctx.agency.id, sid, 'port', d.pay_method, q.price_fc);
+        if (d.cod_amount_fc) ins.run(ctx.agency.id, sid, 'marchandise', d.pay_method, d.cod_amount_fc);
       }
     }
     return sid;
@@ -164,10 +174,11 @@ export function confirmPayment(s, actor, { method, ref, agency = null, deposit =
     db.prepare(`UPDATE shipments SET payment_status = 'paye', shipping_paid = 1, pay_method = ?, payment_ref = ?, paid_at = ? WHERE id = ?`)
       .run(m, r, new Date().toISOString(), s.id);
     if (agency) {
-      db.prepare(`INSERT INTO cash (holder_type, holder_id, shipment_id, kind, method, amount_fc) VALUES ('agence', ?, ?, 'port', ?, ?)`)
-        .run(agency.id, s.id, m, s.price_fc);
+      const ins = db.prepare(`INSERT INTO cash (holder_type, holder_id, shipment_id, kind, method, amount_fc) VALUES ('agence', ?, ?, ?, ?, ?)`);
+      ins.run(agency.id, s.id, 'port', m, s.price_fc);
+      if (s.cod_amount_fc) ins.run(agency.id, s.id, 'marchandise', m, s.cod_amount_fc);
     }
-    addEvent(s.id, s.status, actor?.id, `Paiement confirmé : ${s.price_fc} FC (${m}${r ? ` · ${r}` : ''})`);
+    addEvent(s.id, s.status, actor?.id, `Paiement confirmé : ${prepayTotal(s)} FC (${m}${r ? ` · ${r}` : ''})${s.cod_amount_fc ? `, dont marchandise ${s.cod_amount_fc} FC pour le commerçant` : ''}`);
     let fresh = db.prepare('SELECT * FROM shipments WHERE id = ?').get(s.id);
     if (agency && deposit && fresh.status === 'cree') {
       fresh = move(fresh, 'en_agence', actor, { note: `Déposé au comptoir : ${agency.name}`, patch: { agency_id: agency.id } });
@@ -176,6 +187,22 @@ export function confirmPayment(s, actor, { method, ref, agency = null, deposit =
   })();
   setImmediate(() => notifyShipment(updated, 'paiement').catch((e) => console.error('Notification', e.message)));
   return updated;
+}
+
+/**
+ * Le client (destinataire) envoie la référence de son paiement Mobile Money depuis le lien reçu par SMS.
+ * Il doit donner son numéro de téléphone. Le paiement reste « en attente » jusqu'à la vérification.
+ */
+export function submitPayment(s, { phone, method, ref }) {
+  const last9 = (p) => normPhone(p).replace(/\D/g, '').slice(-9);
+  if (!phone || last9(phone) !== last9(s.recipient_phone)) fail(403, 'Ce numéro ne correspond pas au destinataire du colis');
+  if (s.payment_status !== 'en_attente') fail(409, 'Ce colis est déjà payé');
+  if (!MOBILE.includes(method)) fail(400, 'Choisissez M-Pesa, Airtel Money ou Orange Money');
+  const r = str(ref, 60);
+  if (!r || r.length < 4) fail(400, 'Entrez la référence de la transaction');
+  db.prepare('UPDATE shipments SET pay_method = ?, payment_ref = ? WHERE id = ?').run(method, r, s.id);
+  addEvent(s.id, s.status, null, `Référence de paiement envoyée par le client : ${r}`);
+  return db.prepare('SELECT * FROM shipments WHERE id = ?').get(s.id);
 }
 
 // Scan au dépôt : le colis reçoit son étagère.
@@ -190,8 +217,14 @@ export function agencyReceive(s, actor, agency) {
   return move(s, 'disponible_agence', actor, { note: agency.name, patch: { agency_id: agency.id } });
 }
 
-// Ce que le destinataire doit payer à la remise.
+/** Ce que le client paie AVANT le départ : la livraison (sauf facture du commerçant) + la marchandise. */
+export function prepayTotal(s) {
+  return (s.pay_method === 'compte' ? 0 : s.price_fc) + (s.cod_amount_fc || 0);
+}
+
+// Ce que le destinataire doit payer à la remise : rien, tout est payé d'avance (sauf anciens colis).
 export function amountDue(s) {
+  if (s.payment_status) return { port: 0, marchandise: 0, total: 0 };
   const port = s.pay_method === 'cod' && !s.shipping_paid ? s.price_fc : 0;
   return { port, marchandise: s.cod_amount_fc || 0, total: port + (s.cod_amount_fc || 0) };
 }
@@ -208,6 +241,9 @@ export function handOver(s, actor, { otp, method, photo = null, lat = null, lng 
     if (due.marchandise) {
       ins.run(holder.type, holder.id, s.id, 'marchandise', method, due.marchandise);
       db.prepare(`INSERT INTO payouts (merchant_id, amount_fc, shipment_ids) VALUES (?, ?, ?)`).run(s.merchant_id, due.marchandise, String(s.id));
+    } else if (s.cod_amount_fc && s.merchant_id && s.payment_status === 'paye') {
+      // Marchandise payée d'avance : à passer en entier sur le compte du commerçant (sous 48 h).
+      db.prepare(`INSERT INTO payouts (merchant_id, amount_fc, shipment_ids) VALUES (?, ?, ?)`).run(s.merchant_id, s.cod_amount_fc, String(s.id));
     }
     return move(s, to, actor, {
       lat, lng, note: due.total ? `Encaissé ${due.total} FC (${method})` : null,
@@ -235,6 +271,6 @@ export function publicTrack(s) {
     tracking: s.tracking, status: s.status, label: STATUS_LABELS[s.status], from_commune: s.from_commune, to_commune: s.to_commune,
     to_lat: s.status === 'en_livraison' ? s.to_lat : null, to_lng: s.status === 'en_livraison' ? s.to_lng : null,
     sender: s.sender_name, express: !!s.express, due_fc: amountDue(s).total, events, driver, pickup_agency: pickup,
-    payment: s.payment_status === 'en_attente' ? 'en_attente' : 'ok', price_fc: s.payment_status === 'en_attente' ? s.price_fc : undefined
+    payment: s.payment_status === 'en_attente' ? 'en_attente' : 'ok', price_fc: s.payment_status === 'en_attente' ? prepayTotal(s) : undefined
   };
 }

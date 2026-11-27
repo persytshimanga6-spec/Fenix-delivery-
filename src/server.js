@@ -7,7 +7,7 @@ import { db, setting, dataDir } from './db.js';
 import { ensureBase, seedDemo } from './seed.js';
 import { authenticate, need, login, publicUser, hash, normPhone } from './auth.js';
 import { quote, fail, STATUS_LABELS, HttpError } from './logic.js';
-import { createShipment, mustGet, publicTrack, amountDue } from './shipments.js';
+import { createShipment, mustGet, publicTrack, amountDue, prepayTotal, submitPayment } from './shipments.js';
 import { MOBILE } from './logic.js';
 import { isEmail } from './notify.js';
 import { heatmap, clientQuote } from './pricing.js';
@@ -60,11 +60,28 @@ api.get('/heatmap', need('admin', 'agent'), (_req, res) => res.json({ communes: 
 
 // Réservation en ligne par un client : le prix est payé avant le départ du colis.
 const bookings = new Map();
-api.post('/book', async (req, res) => {
+const limit = (req, max) => {
   const ip = req.ip || 'x', now = Date.now();
   const recent = (bookings.get(ip) || []).filter((t) => now - t < 3600e3);
-  if (recent.length >= 10) fail(429, 'Trop de réservations depuis cette connexion. Réessayez dans une heure.');
+  if (recent.length >= max) fail(429, 'Trop de demandes depuis cette connexion. Réessayez dans une heure.');
   bookings.set(ip, [...recent, now]);
+};
+// Lien de paiement envoyé au client d'un commerçant : livraison + marchandise, payées avant le départ.
+api.get('/pay/:t', (req, res) => {
+  const s = mustGet(req.params.t);
+  const merchant = s.merchant_id ? db.prepare('SELECT name FROM merchants WHERE id = ?').get(s.merchant_id)?.name : null;
+  res.json({ tracking: s.tracking, from: merchant || s.sender_name, to_commune: s.to_commune, status: s.payment_status,
+    delivery_fc: s.pay_method === 'compte' ? 0 : s.price_fc, goods_fc: s.cod_amount_fc || 0, total_fc: prepayTotal(s),
+    pay_method: s.pay_method, ref_sent: !!s.payment_ref,
+    momo: Object.fromEntries(MOBILE.map((m) => [m, setting(`momo_${m}`, '')])) });
+});
+api.post('/pay/:t', (req, res) => {
+  limit(req, 20);
+  const s = submitPayment(mustGet(req.params.t), { phone: req.body.phone, method: req.body.pay_method, ref: req.body.payment_ref });
+  res.json({ tracking: s.tracking, status: s.payment_status, payment_ref: s.payment_ref });
+});
+api.post('/book', async (req, res) => {
+  limit(req, 10);
   const s = await createShipment(req.body, null, { public: true });
   res.status(201).json({ tracking: s.tracking, otp: s.otp, price_fc: s.price_fc, quote: clientQuote(s.quote), pay_method: s.pay_method,
     payment_status: s.payment_status, payment_ref: s.payment_ref, momo_number: setting(`momo_${s.pay_method}`, '') || null });
@@ -145,7 +162,7 @@ merchant.get('/notifications', (req, res) => res.json(db.prepare(`SELECT n.id, n
   // Le code de livraison reste secret : seul le client le voit.
   .map((n) => ({ ...n, message: n.message.replace(/(code de livraison[^:]*: )\d{4}/gi, '$1••••') }))));
 merchant.get('/shipments', (req, res) => {
-  const rows = db.prepare(`SELECT tracking, recipient_name, recipient_phone, to_commune, size, price_fc, pay_method, cod_amount_fc, status, created_at
+  const rows = db.prepare(`SELECT tracking, recipient_name, recipient_phone, to_commune, size, price_fc, pay_method, payment_status, cod_amount_fc, status, created_at
     FROM shipments WHERE merchant_id = ? ORDER BY id DESC LIMIT 500`).all(req.user.merchant_id);
   res.json(rows.map((r) => ({ ...r, label: STATUS_LABELS[r.status] })));
 });

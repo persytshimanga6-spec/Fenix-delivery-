@@ -64,6 +64,7 @@ export async function sendEmail(to, subject, lines, meta = {}, link = null) {
   } catch (e) { setStatus(id, 'echec', e.message); }
 }
 
+const prepay = (s) => (s.pay_method === 'compte' ? 0 : s.price_fc) + (s.cod_amount_fc || 0);
 const MOMO = { mpesa: ['M-Pesa', 'momo_mpesa'], orange: ['Orange Money', 'momo_orange'], airtel: ['Airtel Money', 'momo_airtel'] };
 function payHint(s) {
   if (s.pay_method === 'cash') return `Paiement en attente : payez ${fc(s.price_fc)} en espèces au comptoir d'une agence ${company()}. Le colis partira après le paiement.`;
@@ -96,7 +97,7 @@ export async function notifyShipment(s, event, extra = {}) {
   const S = seller(s);
   const mR = { shipment_id: s.id, audience: 'client' };
   const mS = { shipment_id: s.id, merchant_id: S.merchant_id, audience: 'vendeur' };
-  const due = (s.pay_method === 'cod' && !s.shipping_paid ? s.price_fc : 0) + (s.cod_amount_fc || 0);
+  const due = s.payment_status ? 0 : (s.pay_method === 'cod' && !s.shipping_paid ? s.price_fc : 0) + (s.cod_amount_fc || 0); // tout est payé d'avance (sauf anciens colis)
   const agency = s.pickup_agency_id ? db.prepare('SELECT name, address, commune FROM agencies WHERE id = ?').get(s.pickup_agency_id) : null;
   const jobs = [];
   switch (event) {
@@ -104,14 +105,24 @@ export async function notifyShipment(s, event, extra = {}) {
       jobs.push(both(R, `Un colis arrive pour vous – ${s.tracking}`, [
         `Un colis de ${s.sender_name} arrive pour vous (${s.tracking}).`,
         `Code de livraison : ${extra.otp}. Donnez-le seulement quand vous avez le colis en main.`,
+        ...(s.cod_amount_fc && s.payment_status === 'en_attente' ? [
+          `Avant l'envoi, payez ${fc(prepay(s))} (livraison ${fc(s.price_fc)} + marchandise ${fc(s.cod_amount_fc)}) ici : ${publicUrl()}/payer.html?n=${s.tracking}`] : []),
         ...(due ? [`À payer à la réception : ${fc(due)}.`] : [])], mR, link));
       jobs.push(both(S, `Envoi enregistré – ${s.tracking}`, [
         `Envoi ${s.tracking} enregistré pour ${s.recipient_name} (${s.to_commune}). Prix : ${fc(s.price_fc)}.`,
-        ...(s.payment_status === 'en_attente' ? [payHint(s)] : [])], mS, link));
+        ...(s.cod_amount_fc && s.payment_status === 'en_attente'
+          ? [`Votre client a reçu le lien pour payer ${fc(prepay(s))} (livraison + marchandise). Le colis partira après son paiement.`]
+          : s.payment_status === 'en_attente' ? [payHint(s)] : [])], mS, link));
       break;
     case 'paiement':
-      jobs.push(both(S, `Paiement reçu – ${s.tracking}`, [
-        `Paiement de ${fc(s.price_fc)} reçu pour l'envoi ${s.tracking}. Votre colis peut partir.`], mS, link));
+      if (s.cod_amount_fc) {
+        jobs.push(both(R, `Paiement reçu – ${s.tracking}`, [`Paiement de ${fc(prepay(s))} reçu. Votre colis ${s.tracking} va partir.`], mR, link));
+        jobs.push(both(S, `Votre client a payé – ${s.tracking}`, [
+          `Votre client a payé l'envoi ${s.tracking}. La marchandise (${fc(s.cod_amount_fc)}) vous sera reversée en entier sous 48 h après la livraison.`], mS, link));
+      } else {
+        jobs.push(both(S, `Paiement reçu – ${s.tracking}`, [
+          `Paiement de ${fc(s.price_fc)} reçu pour l'envoi ${s.tracking}. Votre colis peut partir.`], mS, link));
+      }
       break;
     case 'ramasse':
       jobs.push(both(S, `Colis ramassé – ${s.tracking}`, [`Votre colis ${s.tracking} a été ramassé par notre livreur.`], mS, link));
@@ -129,7 +140,7 @@ export async function notifyShipment(s, event, extra = {}) {
       jobs.push(both(R, `Colis ${how} – ${s.tracking}`, [`Votre colis ${s.tracking} a été ${how}. Merci d'avoir choisi ${company()} !`], mR, null));
       jobs.push(both(S, `Colis ${how} – ${s.tracking}`, [
         `Le colis ${s.tracking} a été ${how} à ${s.recipient_name}.`,
-        ...(s.cod_amount_fc ? [`${fc(s.cod_amount_fc)} encaissés pour vous, reversés sous 48 h.`] : [])], mS, link));
+        ...(s.cod_amount_fc ? [`Marchandise payée d'avance : ${fc(s.cod_amount_fc)} reversés sur votre compte sous 48 h.`] : [])], mS, link));
       break;
     }
     case 'echec':

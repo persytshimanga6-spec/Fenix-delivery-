@@ -95,7 +95,7 @@ async function renderPending() {
   $('#payCount').textContent = rows.length; $('#payCount').classList.toggle('hidden', !rows.length);
   $('#pending').innerHTML = rows.map((s) => `<tr><td>${esc(s.tracking)}<div class="tiny muted">${when(s.created_at)}</div></td>
     <td>${esc(s.sender_name)}<div class="tiny muted">${esc(s.sender_phone)}</div></td><td class="small">${esc(s.from_commune)} → ${esc(s.to_commune)}</td>
-    <td><strong>${fc(s.price_fc)}</strong></td><td class="small">${esc(PAY[s.pay_method] || s.pay_method)}${s.payment_ref ? `<div class="tiny">${esc(s.payment_ref)}</div>` : ''}</td>
+    <td><strong>${fc(s.total_fc)}</strong>${s.cod_amount_fc ? `<div class="tiny muted">livraison ${fc(s.price_fc)} + marchandise ${fc(s.cod_amount_fc)}</div>` : ''}</td><td class="small">${esc(PAY[s.pay_method] || s.pay_method)}${s.payment_ref ? `<div class="tiny">${esc(s.payment_ref)}</div>` : '<div class="tiny muted">référence pas encore reçue</div>'}</td>
     <td><button class="primary" data-confirm="${esc(s.tracking)}" data-method="${esc(s.pay_method)}">${s.pay_method === 'cash' ? 'Espèces reçues + colis déposé' : 'Paiement vérifié'}</button></td></tr>`).join('')
     || '<tr><td colspan="6" class="muted">Aucun paiement en attente.</td></tr>';
 }
@@ -119,7 +119,7 @@ $('#waiting').onclick = (e) => {
   hTrk = s.tracking; hPay = 'cash';
   $('#handover').reset(); $('#handover').classList.remove('hidden');
   $('#hTitle').textContent = s.tracking;
-  $('#hInfo').innerHTML = `${esc(s.recipient_name)} · ${s.due ? `<strong>À encaisser : ${fc(s.due)}</strong>` : 'Rien à payer'}`;
+  $('#hInfo').innerHTML = `${esc(s.recipient_name)} · ${s.due ? `<strong>Ancien colis, à encaisser : ${fc(s.due)}</strong>` : 'Payé d’avance : rien à demander'}`;
   $('#hPayBox').classList.toggle('hidden', !s.due);
   pills($('#hPay'), MONEY, hPay, (v) => (hPay = v));
   $('[name=otp]', $('#handover')).focus();

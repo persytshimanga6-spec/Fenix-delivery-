@@ -31,8 +31,9 @@ r.get('/dashboard', (_req, res) => {
 });
 
 // Paiements en attente (Mobile Money à vérifier sur le téléphone de l'entreprise).
-r.get('/payments', (_req, res) => res.json(db.prepare(`SELECT id, tracking, sender_name, sender_phone, from_commune, to_commune, price_fc,
-  pay_method, payment_ref, created_at FROM shipments WHERE payment_status = 'en_attente' AND status != 'annule' ORDER BY id DESC LIMIT 200`).all()));
+r.get('/payments', (_req, res) => res.json(db.prepare(`SELECT id, tracking, sender_name, sender_phone, recipient_name, recipient_phone, from_commune, to_commune, price_fc, cod_amount_fc,
+  price_fc + cod_amount_fc AS total_fc, pay_method, payment_ref, merchant_id, created_at FROM shipments
+  WHERE payment_status = 'en_attente' AND status != 'annule' ORDER BY id DESC LIMIT 200`).all()));
 r.post('/shipments/:t/confirm-payment', (req, res) => {
   const { otp_hash, ...s } = confirmPayment(mustGet(req.params.t), req.user, { method: req.body.method, ref: req.body.ref });
   res.json(s);
@@ -144,7 +145,7 @@ r.put('/rates', (req, res) => {
       if (int(x.price_fc) <= 0) fail(400, 'Prix invalide');
       db.prepare('UPDATE rates SET price_fc = ? WHERE zone = ? AND size = ?').run(int(x.price_fc), int(x.zone), x.size);
     }
-    const allowed = ['company_name', 'express_supplement_fc', 'cod_fee_pct', 'retry_fee_fc', 'insurance_pct', 'driver_share_pct', 'relay_commission_pct',
+    const allowed = ['company_name', 'express_supplement_fc', 'retry_fee_fc', 'insurance_pct', 'driver_share_pct', 'relay_commission_pct',
       'base_petit_fc', 'base_moyen_fc', 'base_grand_fc', 'fuel_price_fc', 'fuel_l_per_km', 'minute_fc', 'speed_normal_kmh', 'speed_rush_kmh',
       'rush_hours', 'road_factor', 'momo_mpesa', 'momo_orange', 'momo_airtel'];
     for (const [k, v] of Object.entries(req.body.settings || {})) {

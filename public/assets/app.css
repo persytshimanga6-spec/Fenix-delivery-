@@ -92,8 +92,7 @@ dialog .card{border:none}
 .chip b{color:var(--orange-light);font-weight:600}
 input[type=checkbox],input[type=radio]{accent-color:var(--orange)}
 
-/* Carte des zones occupées */
+/* Carte « où sont les colis » */
 .heat-label{color:#fff;font:700 12px/20px var(--mono),monospace;text-align:center;text-shadow:0 1px 2px #000}
 .heat-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--ink2)}
 .heat-legend i{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:6px;vertical-align:-1px}
-.surge{display:inline-flex;align-items:center;gap:6px;background:#2A1740;color:#D9BFFF;border:1px solid #5B2F94;border-radius:999px;padding:3px 10px;font-size:12px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em}

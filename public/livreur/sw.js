@@ -1,6 +1,6 @@
 // Garde l'appli livreur disponible même avec un réseau faible (pages et scripts en cache).
-const CACHE = 'kc-livreur-v3';
-const FILES = ['/livreur/', '/assets/app.css', '/assets/app.js', '/vendor/html5-qrcode/html5-qrcode.min.js', '/livreur/manifest.json', '/vendor/leaflet/leaflet.js', '/vendor/leaflet/leaflet.css', '/livreur/icon.svg', '/assets/phoenix.svg'];
+const CACHE = 'kc-livreur-v4';
+const FILES = ['/livreur/', '/assets/app.css', '/assets/app.js', '/vendor/html5-qrcode/html5-qrcode.min.js', '/livreur/manifest.json', '/livreur/icon.svg', '/assets/phoenix.svg'];
 self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting())));
 self.addEventListener('activate', (e) => e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', (e) => {

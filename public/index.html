@@ -4,12 +4,13 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fenix Delivery – Livraison de colis à Kinshasa</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
 <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body>
 <header class="top"><div class="wrap">
   <span class="brand" style="font-size:22px"><span>Fenix<em>Delivery</em></span></span>
-  <nav><a href="/suivi">Suivre un colis</a><a href="/commercant/">Espace commerçant</a></nav>
+  <nav><a href="#envoyer">Envoyer un colis</a><a href="/suivi">Suivre un colis</a><a href="/commercant/">Espace commerçant</a></nav>
 </div></header>
 
 <main class="wrap stack" style="gap:20px">
@@ -18,27 +19,85 @@
     <div class="panel">
     <div class="eyebrow">Livraison de colis — Kinshasa, RDC</div>
     <h1>Vos colis livrés <span class="accent">partout</span> à Kinshasa.</h1>
-    <p>Suivi à chaque étape, code de livraison, paiement à la livraison et argent reversé sous 48 h aux commerçants.</p>
+    <p>Prix calculé pour votre trajet, payé avant l'envoi par Mobile Money ou au comptoir. Suivi à chaque étape et code de livraison.</p>
     <form id="track" class="row">
       <label for="n" class="hidden">Numéro de suivi</label>
-      <input id="n" name="n" placeholder="Numéro de suivi, ex. KIN-1124-000123" required style="flex:1;min-width:220px">
+      <input id="n" name="n" placeholder="Numéro de suivi, ex. FX-1124-000123" required style="flex:1;min-width:220px">
       <button class="primary" type="submit">Suivre</button>
     </form>
     <div class="row" style="gap:8px"><span class="chip"><b>24</b> communes</span><span class="chip">Code de livraison <b>par SMS</b></span></div>
     </div>
   </section>
 
-  <section class="grid2">
-    <div class="card stack">
-      <h2>Combien coûte un envoi ?</h2>
-      <div class="grid">
-        <label class="f">Départ<select id="qFrom"></select></label>
-        <label class="f">Arrivée<select id="qTo"></select></label>
+  <section class="grid2" style="align-items:start">
+    <div class="card stack" id="envoyer">
+      <div class="spread"><h2 style="margin:0">Envoyer un colis</h2><span class="chip" id="stepChip">Étape 1 sur 4</span></div>
+
+      <!-- 1. Trajet et devis -->
+      <div class="stack" data-step="1">
+        <div class="grid">
+          <label class="f">Départ<select id="qFrom"></select></label>
+          <label class="f">Arrivée<select id="qTo"></select></label>
+        </div>
+        <div class="pills" id="qSize"></div>
+        <label class="row small"><input type="checkbox" id="qExpress"> Express (moins de 2 h)</label>
+        <div class="card" style="background:var(--bg)">
+          <div class="label">Devis du trajet</div>
+          <div id="qLines" class="small"><span class="muted">Choisissez le départ et l'arrivée.</span></div>
+          <div class="spread"><span>Total</span><strong id="qPrice" style="font-size:22px">—</strong></div>
+        </div>
+        <button class="primary big" id="go2" disabled>Continuer</button>
       </div>
-      <div class="pills" id="qSize"></div>
-      <label class="row small"><input type="checkbox" id="qExpress"> Express (moins de 2 h)</label>
-      <div class="spread"><span class="muted">Prix</span><strong id="qPrice" style="font-size:22px">—</strong></div>
-      <div class="small muted" id="qInfo"></div>
+
+      <!-- 2. Expéditeur et destinataire -->
+      <form class="stack hidden" data-step="2" id="who">
+        <div class="label">Vous (expéditeur)</div>
+        <div class="grid">
+          <label class="f">Nom<input name="sender_name" required></label>
+          <label class="f">Téléphone<input name="sender_phone" type="tel" required></label>
+        </div>
+        <div class="pills" id="handMode"></div>
+        <label class="f" id="fromLmField">Où le livreur ramasse le colis (repère)<input name="from_landmark" placeholder="Ex. arrêt Righini, maison au portail vert"></label>
+        <div class="label">Destinataire</div>
+        <div class="grid">
+          <label class="f">Nom<input name="recipient_name" required></label>
+          <label class="f">Téléphone<input name="recipient_phone" type="tel" required></label>
+        </div>
+        <div class="pills" id="destMode"></div>
+        <div id="destHome" class="stack">
+          <label class="f">Repère de livraison<input name="to_landmark" placeholder="Ex. portail bleu après l'église"></label>
+          <div id="map" class="map" style="height:260px"></div>
+          <p class="tiny muted" style="margin:0">Touchez la carte à l'endroit de la livraison.</p>
+        </div>
+        <label class="f hidden" id="destAgency">Agence de retrait<select name="pickup_agency_id" id="pickupAgency"></select></label>
+        <div class="row"><button type="button" class="ghost" data-back="1">Retour</button><button class="primary big" style="flex:1">Continuer vers le paiement</button></div>
+      </form>
+
+      <!-- 3. Paiement -->
+      <form class="stack hidden" data-step="3" id="payForm">
+        <div class="card" style="background:var(--bg)"><div id="pLines" class="small"></div>
+          <div class="spread"><span>À payer maintenant</span><strong id="pPrice" style="font-size:22px">—</strong></div></div>
+        <div class="label">Moyen de paiement</div>
+        <div class="pills" id="payPills"></div>
+        <div id="momoBox" class="stack">
+          <p class="small" id="momoHint" style="margin:0"></p>
+          <label class="f">Référence de la transaction<input name="payment_ref" id="payRef" autocomplete="off" placeholder="Référence reçue par SMS"></label>
+        </div>
+        <p class="small hidden" id="cashHint" style="margin:0">Payez en espèces au comptoir de l'agence en déposant votre colis. Il partira juste après.</p>
+        <div class="row"><button type="button" class="ghost" data-back="2">Retour</button><button class="primary big" style="flex:1" id="payBtn">Confirmer la réservation</button></div>
+      </form>
+
+      <!-- 4. Confirmation -->
+      <div class="stack hidden" data-step="4">
+        <div class="eyebrow">Réservation enregistrée</div>
+        <div class="grid">
+          <div class="card" style="background:var(--bg)"><div class="label">Numéro de suivi</div><strong id="cTrk" style="font-size:22px"></strong></div>
+          <div class="card" style="background:var(--bg)"><div class="label">Code de livraison</div><strong id="cOtp" style="font-size:28px;letter-spacing:.2em"></strong></div>
+        </div>
+        <p class="small" style="margin:0">Donnez ce code <strong>seulement</strong> à votre destinataire. Le livreur le demandera à la remise du colis.</p>
+        <p class="small" id="cPay" style="margin:0"></p>
+        <div class="row"><a class="btn primary" id="cTrack">Suivre le colis</a><button class="ghost" id="again">Nouvel envoi</button></div>
+      </div>
     </div>
     <div class="card stack">
       <h2>Nos agences et points relais</h2>
@@ -48,30 +107,92 @@
   </section>
 
   <section class="card spread">
-    <div><h2>Vous vendez en ligne ou en boutique ?</h2><p class="muted" style="margin:0">Ramassage chaque jour, paiement à la livraison, reversement rapide par Mobile Money.</p></div>
+    <div><h2>Vous vendez en ligne ou en boutique ?</h2><p class="muted" style="margin:0">Ramassage chaque jour, facture de la semaine, encaissement de votre marchandise à la livraison et reversement rapide par Mobile Money.</p></div>
     <a class="btn primary" href="/commercant/#inscription">Devenir commerçant partenaire</a>
   </section>
 </main>
 
+<script src="/vendor/leaflet/leaflet.js"></script>
 <script type="module">
-import { $, api, esc, fc, pills, fillCommunes, run } from '/assets/app.js';
+import { $, api, esc, fc, pills, fillCommunes, run, mapPicker, quoteLines, PAY } from '/assets/app.js';
 const cfg = await api('/api/config');
 document.querySelectorAll('[data-company]').forEach((e) => (e.textContent = cfg.company));
 document.title = `${cfg.company} – Livraison de colis à Kinshasa`;
 $('#track').onsubmit = (e) => { e.preventDefault(); location.href = '/suivi?n=' + encodeURIComponent($('#n').value.trim()); };
 
+// ---------------- Envoyer un colis : devis → coordonnées → paiement → confirmation ----------------
+const B = { size: 'petit', hand: 'livreur', dest: 'domicile', pay: 'mpesa', to_lat: null, to_lng: null, quote: null };
+let picker;
+const step = (n) => {
+  document.querySelectorAll('[data-step]').forEach((e) => e.classList.toggle('hidden', e.dataset.step !== String(n)));
+  $('#stepChip').textContent = `Étape ${n} sur 4`;
+  if (n === 2 && B.dest === 'domicile') {
+    if (!picker) picker = mapPicker($('#map'), (la, ln) => { B.to_lat = la; B.to_lng = ln; });
+    setTimeout(() => picker.map.invalidateSize(), 50);
+  }
+  $('#envoyer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+document.querySelectorAll('[data-back]').forEach((b) => (b.onclick = () => step(Number(b.dataset.back))));
+
 fillCommunes($('#qFrom'), cfg.communes, 'Commune de départ');
 fillCommunes($('#qTo'), cfg.communes, 'Commune d’arrivée');
-let size = 'petit';
+$('#pickupAgency').innerHTML = cfg.agencies.map((a) => `<option value="${a.id}">${esc(a.name)} · ${esc(a.commune || '')}</option>`).join('');
+
+const body = () => ({ from_commune: $('#qFrom').value, to_commune: $('#qTo').value, size: B.size, express: $('#qExpress').checked,
+  ...(B.dest === 'domicile' ? { to_lat: B.to_lat, to_lng: B.to_lng } : { pickup_agency_id: $('#pickupAgency').value }) });
 const update = run(async () => {
-  if (!$('#qFrom').value || !$('#qTo').value) return ($('#qPrice').textContent = '—');
-  const q = await api('/api/quote', { method: 'POST', body: { from_commune: $('#qFrom').value, to_commune: $('#qTo').value, size, express: $('#qExpress').checked } });
-  $('#qPrice').textContent = fc(q.price_fc);
-  $('#qInfo').innerHTML = [q.distance_km != null ? `Environ ${q.distance_km.toLocaleString('fr-FR')} km` : '',
-    q.surge?.pct ? `<span class="surge">Forte demande +${q.surge.pct} %</span>` : ''].filter(Boolean).join(' · ');
+  if (!$('#qFrom').value || !$('#qTo').value) { $('#qPrice').textContent = '—'; $('#go2').disabled = true; return; }
+  B.quote = await api('/api/quote', { method: 'POST', body: body() });
+  $('#qLines').innerHTML = quoteLines(B.quote);
+  $('#qPrice').textContent = fc(B.quote.price_fc);
+  $('#go2').disabled = false;
 });
-pills($('#qSize'), [['petit', 'Petit'], ['moyen', 'Moyen'], ['grand', 'Grand']], size, (v) => { size = v; update(); });
+pills($('#qSize'), [['petit', 'Petit · enveloppe'], ['moyen', 'Moyen · chaussures'], ['grand', 'Grand · carton']], B.size, (v) => { B.size = v; update(); });
 ['#qFrom', '#qTo', '#qExpress'].forEach((s) => ($(s).onchange = update));
+$('#go2').onclick = () => step(2);
+
+pills($('#handMode'), [['livreur', 'Un livreur vient chercher le colis'], ['agence', 'Je le dépose dans une agence']], B.hand, (v) => {
+  B.hand = v; $('#fromLmField').classList.toggle('hidden', v !== 'livreur');
+});
+pills($('#destMode'), [['domicile', 'Livraison à domicile'], ['agence', 'Retrait en agence']], B.dest, (v) => {
+  B.dest = v; $('#destHome').classList.toggle('hidden', v !== 'domicile'); $('#destAgency').classList.toggle('hidden', v !== 'agence');
+  if (v === 'domicile') { if (!picker) picker = mapPicker($('#map'), (la, ln) => { B.to_lat = la; B.to_lng = ln; }); setTimeout(() => picker.map.invalidateSize(), 50); }
+  update();
+});
+
+$('#who').onsubmit = run(async (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  if (B.hand === 'livreur' && !String(f.get('from_landmark') || '').trim()) throw new Error('Indiquez où le livreur ramasse le colis');
+  if (B.dest === 'domicile' && (!String(f.get('to_landmark') || '').trim() || B.to_lat == null)) throw new Error('Indiquez le repère et touchez la carte à l’endroit de la livraison');
+  B.quote = await api('/api/quote', { method: 'POST', body: body() }); // prix avec le point exact
+  $('#pLines').innerHTML = quoteLines(B.quote); $('#pPrice').textContent = fc(B.quote.price_fc);
+  const opts = [['mpesa', 'M-Pesa'], ['airtel', 'Airtel Money'], ['orange', 'Orange Money'], ...(B.hand === 'agence' ? [['cash', 'Au comptoir (espèces)']] : [])];
+  if (!opts.some(([v]) => v === B.pay)) B.pay = 'mpesa';
+  pills($('#payPills'), opts, B.pay, (v) => { B.pay = v; payHint(); });
+  payHint(); step(3);
+});
+const payHint = () => {
+  const cash = B.pay === 'cash';
+  $('#momoBox').classList.toggle('hidden', cash); $('#cashHint').classList.toggle('hidden', !cash);
+  const nb = cfg.momo?.[B.pay];
+  $('#momoHint').innerHTML = cash ? '' : `1. Envoyez <strong>${fc(B.quote.price_fc)}</strong> par ${esc(PAY[B.pay])}${nb ? ` au <strong>${esc(nb)}</strong>` : ''}.<br>2. Entrez la référence de la transaction reçue par SMS.`;
+};
+
+$('#payForm').onsubmit = run(async (e) => {
+  e.preventDefault();
+  const who = Object.fromEntries(new FormData($('#who')));
+  if (B.hand === 'agence') who.from_landmark = '';
+  if (B.dest === 'agence') delete who.to_landmark; else delete who.pickup_agency_id;
+  const r = await api('/api/book', { method: 'POST', body: { ...who, ...body(), pay_method: B.pay, payment_ref: B.pay === 'cash' ? '' : $('#payRef').value.trim() } });
+  $('#cTrk').textContent = r.tracking; $('#cOtp').textContent = r.otp;
+  $('#cTrack').href = '/suivi?n=' + encodeURIComponent(r.tracking);
+  $('#cPay').innerHTML = r.pay_method === 'cash'
+    ? `Paiement : <strong>${fc(r.price_fc)}</strong> à payer au comptoir en déposant le colis. Il partira juste après.`
+    : `Paiement ${esc(PAY[r.pay_method])} (réf. ${esc(r.payment_ref)}) : <strong>en cours de vérification</strong>. Le livreur viendra dès qu'il est confirmé. Vous recevrez un SMS.`;
+  step(4);
+});
+$('#again').onclick = () => { $('#who').reset(); $('#payForm').reset(); step(1); };
 
 $('#agencies').innerHTML = cfg.agencies.map((a) => `<li><strong>${esc(a.name)}</strong> <span class="muted small">· ${esc(a.kind === 'relais' ? 'point relais' : a.kind)} · ${esc(a.commune || '')} ${esc(a.address || '')}</span></li>`).join('')
   || '<li class="muted">Bientôt disponible</li>';

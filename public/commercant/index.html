@@ -85,11 +85,17 @@
         <label class="row small"><input type="checkbox" name="express"> Express (moins de 2 h)</label>
         <label class="row small"><input type="checkbox" name="insured" id="insured"> Assurer le colis</label>
         <label class="f hidden" id="valueField">Valeur déclarée (FC)<input name="declared_value_fc" type="number" min="0" step="100"></label>
-        <div class="label">Qui paie la livraison ?</div>
-        <div class="pills" id="pay"></div>
         <div class="card" style="background:var(--bg)">
-          <div id="quoteLines" class="small muted"></div>
+          <div class="label">Devis du trajet</div>
+          <div id="quoteLines" class="small"></div>
           <div class="spread"><span>Prix de la livraison</span><strong id="price" style="font-size:20px">—</strong></div>
+        </div>
+        <div class="label">Paiement de la livraison (avant le départ du colis)</div>
+        <div class="pills" id="pay"></div>
+        <div id="momoBox" class="card stack hidden" style="background:var(--bg)">
+          <div class="small" id="momoHint"></div>
+          <label class="f">Référence de la transaction<input name="payment_ref" id="payRef" placeholder="Ex. MP2611AB12" autocomplete="off"></label>
+          <p class="tiny muted" style="margin:0">Le colis part dès que nous avons vérifié le paiement.</p>
         </div>
         <button class="primary big" type="submit">Créer l'envoi</button>
       </div>
@@ -123,7 +129,7 @@
 
 <script src="/vendor/leaflet/leaflet.js"></script>
 <script type="module">
-import { $, $$, api, esc, fc, when, toast, run, badge, pills, fillCommunes, mapPicker, requireLogin, logout, PAY } from '/assets/app.js';
+import { $, $$, api, esc, fc, when, toast, run, badge, pills, fillCommunes, mapPicker, requireLogin, logout, PAY, PAY_STATE, quoteLines } from '/assets/app.js';
 const cfg = await api('/api/config');
 $$('[data-company]').forEach((e) => (e.textContent = cfg.company));
 
@@ -153,7 +159,7 @@ $('#signupForm').onsubmit = run(async (e) => {
 
 // ---------- Espace connecté ----------
 let me, profile, picker;
-const order = { size: 'petit', pay_method: 'cod', mode: 'domicile', to_lat: null, to_lng: null };
+const order = { size: 'petit', pay_method: 'compte', mode: 'domicile', to_lat: null, to_lng: null };
 
 function tab() {
   const t = (location.hash || '#envois').slice(1);
@@ -171,7 +177,7 @@ const loadList = run(async () => {
   const rows = await api('/api/merchant/shipments');
   $('#list').innerHTML = rows.map((r) => `<tr><td><a href="/suivi?n=${esc(r.tracking)}">${esc(r.tracking)}</a><div class="tiny muted">${when(r.created_at)}</div></td>
     <td>${esc(r.recipient_name)}<div class="tiny muted">${esc(r.recipient_phone)}</div></td><td>${esc(r.to_commune)}</td>
-    <td>${fc(r.price_fc)}<div class="tiny muted">${esc(PAY[r.pay_method])}</div></td><td>${r.cod_amount_fc ? fc(r.cod_amount_fc) : '—'}</td>
+    <td>${fc(r.price_fc)}<div class="tiny muted">${esc(PAY[r.pay_method] || '')}${r.payment_status === 'en_attente' ? ' · <span style="color:#F4B683">paiement en attente</span>' : ''}</div></td><td>${r.cod_amount_fc ? fc(r.cod_amount_fc) : '—'}</td>
     <td>${badge(r.status, r.label)}</td><td><a class="btn" href="/etiquette/${esc(r.tracking)}" target="_blank" rel="noopener">Étiquette</a></td></tr>`).join('')
     || '<tr><td colspan="7" class="muted">Aucun envoi pour l’instant.</td></tr>';
 });
@@ -207,8 +213,8 @@ const quote = run(async () => {
     from_commune: profile.commune, from_lat: profile.lat, from_lng: profile.lng, to_commune: f.get('to_commune'), size: order.size,
     ...(order.mode === 'domicile' ? { to_lat: order.to_lat, to_lng: order.to_lng } : { pickup_agency_id: f.get('pickup_agency_id') }), express: !!f.get('express'),
     insured: !!f.get('insured'), declared_value_fc: f.get('declared_value_fc'), cod_amount_fc: f.get('cod_amount_fc') } });
-  $('#quoteLines').innerHTML = q.lines.map((l) => (l.fc == null ? `<div class="surge" style="margin:2px 0">${esc(l.label)}</div>` : `<div class="spread"><span>${esc(l.label)}</span><span>${fc(l.fc)}</span></div>`)).join('');
-  $('#price').textContent = fc(q.price_fc);
+  $('#quoteLines').innerHTML = quoteLines(q);
+  $('#price').textContent = fc(q.price_fc); order.price = q.price_fc; payHint();
 });
 form.oninput = quote;
 $('#insured').onchange = () => $('#valueField').classList.toggle('hidden', !$('#insured').checked);
@@ -225,17 +231,26 @@ const setMode = (v) => {
 pills($('#mode'), [['domicile', 'À domicile'], ['agence', 'Retrait en agence']], order.mode, setMode);
 setMode('domicile');
 pills($('#size'), [['petit', 'Petit · enveloppe, bijou'], ['moyen', 'Moyen · chaussures'], ['grand', 'Grand · carton']], order.size, (v) => { order.size = v; quote(); });
-pills($('#pay'), [['cod', 'Le destinataire paie'], ['compte', 'Sur mon compte']], order.pay_method, (v) => (order.pay_method = v));
+const payHint = () => {
+  const mobile = order.pay_method !== 'compte';
+  $('#momoBox').classList.toggle('hidden', !mobile);
+  if (!mobile) return;
+  const nb = cfg.momo?.[order.pay_method];
+  $('#momoHint').innerHTML = `Envoyez <strong>${order.price ? fc(order.price) : 'le prix'}</strong> par ${esc(PAY[order.pay_method])}${nb ? ` au <strong>${esc(nb)}</strong>` : ''}, puis entrez la référence reçue par SMS.`;
+};
+pills($('#pay'), [['compte', 'Sur mon compte (facture de la semaine)'], ['mpesa', 'M-Pesa'], ['airtel', 'Airtel Money'], ['orange', 'Orange Money']],
+  order.pay_method, (v) => { order.pay_method = v; payHint(); });
 $('#locate').onclick = run(() => picker.locate());
 
 form.onsubmit = run(async (e) => {
   e.preventDefault();
   const f = Object.fromEntries(new FormData(form));
   const body = { ...f, size: order.size, pay_method: order.pay_method, express: !!f.express, insured: !!f.insured };
+  if (order.pay_method === 'compte') delete body.payment_ref;
   if (order.mode === 'domicile') { body.to_lat = order.to_lat; body.to_lng = order.to_lng; delete body.pickup_agency_id; }
   else { delete body.to_landmark; }
   const s = await api('/api/merchant/shipments', { method: 'POST', body });
-  toast(`Envoi ${s.tracking} créé. Le client a reçu son code${s.recipient_email ? ' par SMS et e-mail' : ' par SMS'}.`);
+  toast(s.payment_status === 'en_attente' ? `Envoi ${s.tracking} créé. Il partira dès que le paiement est vérifié.` : `Envoi ${s.tracking} créé. Le client a reçu son code${s.recipient_email ? ' par SMS et e-mail' : ' par SMS'}.`);
   window.open('/etiquette/' + s.tracking, '_blank', 'noopener');
   form.reset(); location.hash = '#envois';
 });

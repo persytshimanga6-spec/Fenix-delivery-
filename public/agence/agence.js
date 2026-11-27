@@ -1,4 +1,4 @@
-import { $, $$, api, esc, fc, when, toast, run, pills, fillCommunes, mapPicker, requireLogin, logout, PAY } from '/assets/app.js';
+import { $, $$, api, esc, fc, when, toast, run, pills, fillCommunes, mapPicker, requireLogin, logout, PAY, quoteLines } from '/assets/app.js';
 
 const cfg = await api('/api/config');
 $$('[data-company]').forEach((e) => (e.textContent = cfg.company));
@@ -60,7 +60,7 @@ const quote = run(async () => {
   const r = await api('/api/quote', { method: 'POST', body: { from_commune: info.agency.commune, from_lat: info.agency.lat, from_lng: info.agency.lng, to_commune: f.get('to_commune'), size: ship.size,
     ...(ship.mode === 'domicile' ? { to_lat: ship.to_lat, to_lng: ship.to_lng } : { pickup_agency_id: f.get('pickup_agency_id') }),
     express: !!f.get('express'), insured: !!f.get('insured'), declared_value_fc: f.get('declared_value_fc') } });
-  $('#quoteLines').innerHTML = r.lines.map((l) => (l.fc == null ? `<div class="surge" style="margin:2px 0">${esc(l.label)}</div>` : `<div class="spread"><span>${esc(l.label)}</span><span>${fc(l.fc)}</span></div>`)).join('');
+  $('#quoteLines').innerHTML = quoteLines(r);
   $('#price').textContent = fc(r.price_fc);
 });
 form.oninput = quote;
@@ -76,16 +76,34 @@ const setMode = (v) => {
 pills($('#mode'), [['domicile', 'Livraison à domicile'], ['agence', 'Retrait en agence']], ship.mode, setMode);
 setMode('domicile');
 pills($('#size'), [['petit', 'Petit'], ['moyen', 'Moyen'], ['grand', 'Grand']], ship.size, (v) => { ship.size = v; quote(); });
-pills($('#shipPay'), [...MONEY, ['cod', 'Le destinataire paie']], ship.pay_method, (v) => (ship.pay_method = v));
+pills($('#shipPay'), MONEY, ship.pay_method, (v) => { ship.pay_method = v; $('#shipRefField').classList.toggle('hidden', v === 'cash'); });
 form.onsubmit = run(async (e) => {
   e.preventDefault();
   const f = Object.fromEntries(new FormData(form));
   const body = { ...f, size: ship.size, pay_method: ship.pay_method, express: !!f.express, insured: !!f.insured };
+  if (ship.pay_method === 'cash') delete body.payment_ref;
   if (ship.mode === 'domicile') { body.to_lat = ship.to_lat; body.to_lng = ship.to_lng; delete body.pickup_agency_id; } else delete body.to_landmark;
   const s = await A('/shipments', { method: 'POST', body });
   window.open('/etiquette/' + s.tracking, '_blank', 'noopener');
   toast(`Envoi ${s.tracking} enregistré · ${fc(s.price_fc)}`);
   form.reset(); $('#price').textContent = '—'; $('#quoteLines').innerHTML = '';
+});
+
+// ---------------- Paiements à confirmer ----------------
+async function renderPending() {
+  const rows = await A('/payments');
+  $('#payCount').textContent = rows.length; $('#payCount').classList.toggle('hidden', !rows.length);
+  $('#pending').innerHTML = rows.map((s) => `<tr><td>${esc(s.tracking)}<div class="tiny muted">${when(s.created_at)}</div></td>
+    <td>${esc(s.sender_name)}<div class="tiny muted">${esc(s.sender_phone)}</div></td><td class="small">${esc(s.from_commune)} → ${esc(s.to_commune)}</td>
+    <td><strong>${fc(s.price_fc)}</strong></td><td class="small">${esc(PAY[s.pay_method] || s.pay_method)}${s.payment_ref ? `<div class="tiny">${esc(s.payment_ref)}</div>` : ''}</td>
+    <td><button class="primary" data-confirm="${esc(s.tracking)}" data-method="${esc(s.pay_method)}">${s.pay_method === 'cash' ? 'Espèces reçues + colis déposé' : 'Paiement vérifié'}</button></td></tr>`).join('')
+    || '<tr><td colspan="6" class="muted">Aucun paiement en attente.</td></tr>';
+}
+$('#pending').onclick = run(async (e) => {
+  const b = e.target.closest('[data-confirm]'); if (!b) return;
+  if (!confirm(`Confirmer le paiement de ${b.dataset.confirm} ?`)) return;
+  await A(`/shipments/${encodeURIComponent(b.dataset.confirm)}/confirm-payment`, { method: 'POST', body: { method: b.dataset.method, deposit: b.dataset.method === 'cash' } });
+  toast('Paiement confirmé. Le colis peut partir.'); await renderPending();
 });
 
 // ---------------- Retrait ----------------
@@ -168,6 +186,7 @@ async function tab() {
     if (!picker) picker = mapPicker($('#map'), (la, ln) => { ship.to_lat = la; ship.to_lng = ln; }, info.agency.lat ? null : null);
     setTimeout(() => picker.map.invalidateSize(), 50);
   }
+  if (t === 'paiements') await renderPending();
   if (t === 'retrait') renderWaiting();
   if (t === 'reception') renderDeposited();
   if (t === 'boites') renderBoxes();

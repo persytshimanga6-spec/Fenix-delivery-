@@ -46,8 +46,8 @@ try {
     await driver2.login('0820000002', 'demo123');
     await agent.login('0830000001', 'demo123');
     await relay.login('0830000002', 'demo123');
-    // Les étapes suivantes vérifient l'ancien tableau par zone ; le prix « comme Uber » est testé plus bas.
-    await admin.ok('PUT', '/api/admin/rates', { settings: { pricing_mode: 'zone', surge_on: '0' } });
+    // Prix stables pendant les tests : pas d'heure de pointe (testée plus bas).
+    await admin.ok('PUT', '/api/admin/rates', { settings: { rush_hours: '' } });
   });
 
   let newMerchantId;
@@ -68,21 +68,31 @@ try {
 
   const order = {
     recipient_name: 'Patrick Mbuyi', recipient_phone: '0899999999', to_commune: 'Limete', to_landmark: 'Portail bleu après l’église',
-    to_lat: -4.36, to_lng: 15.34, size: 'moyen', cod_amount_fc: 50000, pay_method: 'cod', recipient_email: 'patrick@exemple.com'
+    to_lat: -4.36, to_lng: 15.34, size: 'moyen', cod_amount_fc: 50000, pay_method: 'mpesa', payment_ref: 'MP2611AB12', recipient_email: 'patrick@exemple.com'
   };
   let s1;
-  await step('devis : zone et prix', async () => {
-    const q = await pub.ok('POST', '/api/quote', { from_commune: 'Kalamu', to_commune: 'Limete', size: 'moyen', cod_amount_fc: 50000 });
-    assert.equal(q.zone, 3); // Funa → Mont-Amba
-    assert.equal(q.price_fc, 13000 + 1000); // tarif + 2 % de 50 000
+  let q1;
+  await step('devis par trajet : prise en charge + carburant + temps', async () => {
+    q1 = await pub.ok('POST', '/api/quote', { from_commune: 'Kalamu', to_commune: 'Limete', size: 'moyen', cod_amount_fc: 50000,
+      from_lat: -4.33, from_lng: 15.31, to_lat: -4.36, to_lng: 15.34 });
+    assert.equal(q1.zone, 3); // Funa → Mont-Amba (sert au tri)
+    const km = q1.distance_km, min = Math.max(1, Math.round(km / 30 * 60));
+    const up = (x) => Math.ceil(x / 100) * 100;
+    assert.equal(q1.minutes, min);
+    assert.equal(q1.price_fc, 4000 + up(km * 0.03 * 2640) + up(min * 100) + 1000); // + 2 % de 50 000
+    assert.ok(q1.lines.some((l) => l.label.startsWith('Carburant')) && q1.lines.some((l) => l.label.startsWith('Trafic')));
+    assert.ok(!JSON.stringify(q1).includes('%'), 'aucun supplément en %');
   });
-  await step('le commerçant crée un envoi (paiement à la livraison + marchandise)', async () => {
+  await step('le commerçant crée un envoi payé par M-Pesa (marchandise encaissée à la livraison)', async () => {
+    assert.equal((await merch.call('POST', '/api/merchant/shipments', { ...order, payment_ref: '' })).status, 400);
+    assert.equal((await merch.call('POST', '/api/merchant/shipments', { ...order, pay_method: 'cod' })).status, 400);
     const missing = await merch.call('POST', '/api/merchant/shipments', { ...order, to_lat: null });
     assert.equal(missing.status, 400);
     s1 = await merch.ok('POST', '/api/merchant/shipments', order);
-    assert.match(s1.tracking, /^KIN-\d{4}-\d{6}$/);
+    assert.match(s1.tracking, /^FX-\d{4}-\d{6}$/);
     assert.equal(s1.from_commune, 'Kalamu');
-    assert.equal(s1.price_fc, 14000);
+    assert.equal(s1.price_fc, q1.price_fc);
+    assert.equal(s1.payment_status, 'en_attente'); assert.equal(s1.shipping_paid, 0);
     const sms = await admin.ok('GET', '/api/admin/sms');
     assert.ok(sms.some((m) => m.message.includes(s1.tracking) && m.message.includes(s1.otp_demo)));
     const n = await admin.ok('GET', '/api/admin/notifications?channel=email');
@@ -93,11 +103,12 @@ try {
     const t = await pub.ok('GET', `/api/track/${s1.tracking}`);
     assert.equal(t.status, 'cree');
     assert.equal(t.recipient_phone, undefined);
-    assert.equal(t.due_fc, 64000);
+    assert.equal(t.due_fc, 50000); // seulement la marchandise : le port est payé avant
+    assert.equal(t.payment, 'en_attente');
   });
   await step('étiquette : propriétaire oui, autre commerçant non', async () => {
     const lbl = await merch.ok('GET', `/etiquette/${s1.tracking}`);
-    assert.ok(lbl.includes(s1.tracking) && lbl.includes('64'));
+    assert.ok(lbl.includes(s1.tracking));
     const other = client(); await other.login('0810000001', 'demo123');
     assert.equal((await other.call('GET', `/etiquette/${s1.tracking}`)).status, 403);
   });
@@ -109,6 +120,15 @@ try {
   const drivers = (await admin.ok('GET', '/api/admin/users')).filter((u) => u.role === 'livreur');
   const jk = drivers.find((d) => d.phone === '0820000001'); const gm = drivers.find((d) => d.phone === '0820000002');
 
+  await step('non payé : aucun livreur, puis paiement confirmé par le comptoir', async () => {
+    assert.equal((await admin.call('POST', `/api/admin/shipments/${s1.tracking}/assign`, { driver_id: jk.id })).status, 402);
+    assert.equal((await agent.call('POST', '/api/agency/depot-scan', { tracking: s1.tracking })).status, 402);
+    const pend = await agent.ok('GET', '/api/agency/payments');
+    assert.ok(pend.some((x) => x.tracking === s1.tracking && x.payment_ref === 'MP2611AB12'));
+    const c = await admin.ok('POST', `/api/admin/shipments/${s1.tracking}/confirm-payment`, {});
+    assert.equal(c.payment_status, 'paye'); assert.equal(c.shipping_paid, 1);
+    assert.equal((await admin.call('POST', `/api/admin/shipments/${s1.tracking}/confirm-payment`, {})).status, 409);
+  });
   await step('ramassage : assignation, scan chez le commerçant', async () => {
     await admin.ok('POST', `/api/admin/shipments/${s1.tracking}/assign`, { driver_id: jk.id });
     const mine = await driver.ok('GET', '/api/driver/shipments');
@@ -140,7 +160,7 @@ try {
     assert.equal(done.status, 'livre');
     assert.ok(done.photo);
     const cash = await driver.ok('GET', '/api/driver/cash');
-    assert.equal(cash[0].total, 64000);
+    assert.equal(cash[0].total, 50000);
     await new Promise((r) => setTimeout(r, 20));
     const mine = await merch.ok('GET', '/api/merchant/notifications');
     assert.ok(!mine.some((m) => m.message.includes(`livraison : ${s1.otp_demo}`)), 'le commerçant ne voit pas le code du client');
@@ -179,7 +199,7 @@ try {
       sender_name: 'Marie', sender_phone: '0812222222', recipient_name: 'Joël', recipient_phone: '0813333333',
       to_commune: 'Limete', size: 'petit', pay_method: 'cash', pickup_agency_id: relayId
     });
-    assert.equal(s3.status, 'en_agence'); assert.equal(s3.shipping_paid, 1); assert.equal(s3.price_fc, 10000);
+    assert.equal(s3.status, 'en_agence'); assert.equal(s3.shipping_paid, 1); assert.equal(s3.payment_status, 'paye');
     await agent.ok('POST', '/api/agency/depot-scan', { tracking: s3.tracking });
     await admin.ok('POST', `/api/admin/shipments/${s3.tracking}/assign`, { driver_id: gm.id });
     await driver2.ok('POST', `/api/driver/shipments/${s3.tracking}/start`, {});
@@ -193,9 +213,9 @@ try {
   await step('colis déposé au point relais, ramassé par un livreur puis trié', async () => {
     const s4 = await relay.ok('POST', '/api/agency/shipments', {
       sender_name: 'Aline', sender_phone: '0815555555', recipient_name: 'Ben', recipient_phone: '0816666666',
-      to_commune: 'Gombe', to_landmark: 'Immeuble rouge', to_lat: -4.30, to_lng: 15.31, size: 'grand', pay_method: 'cod'
+      to_commune: 'Gombe', to_landmark: 'Immeuble rouge', to_lat: -4.30, to_lng: 15.31, size: 'grand', pay_method: 'airtel', payment_ref: 'AM-778899'
     });
-    assert.equal(s4.status, 'en_agence'); assert.equal(s4.shipping_paid, 0);
+    assert.equal(s4.status, 'en_agence'); assert.equal(s4.shipping_paid, 1); // payé au comptoir
     await admin.ok('POST', `/api/admin/shipments/${s4.tracking}/assign`, { driver_id: gm.id });
     const list = await driver2.ok('GET', '/api/driver/shipments');
     assert.equal(list.shipments.find((x) => x.tracking === s4.tracking).deposit_agency_name, 'Relais Cyber Limete');
@@ -203,6 +223,26 @@ try {
     assert.equal(p.status, 'ramasse');
     const d = await agent.ok('POST', '/api/agency/depot-scan', { tracking: s4.tracking });
     assert.equal(d.shelf, 'LUKUNGA · GOMBE');
+  });
+  let pubMomo, pubCash;
+  await step('réservation en ligne : payée avant le départ (Mobile Money, puis espèces au comptoir)', async () => {
+    const book = { sender_name: 'Rachel', sender_phone: '0817777777', from_commune: 'Lemba', from_landmark: 'Arrêt Righini',
+      recipient_name: 'Paul', recipient_phone: '0818888888', to_commune: 'Gombe', to_landmark: 'Boulevard du 30 juin', to_lat: -4.31, to_lng: 15.3, size: 'petit' };
+    assert.equal((await pub.call('POST', '/api/book', { ...book, pay_method: 'compte' })).status, 400);
+    assert.equal((await pub.call('POST', '/api/book', { ...book, pay_method: 'orange' })).status, 400); // référence obligatoire
+    pubMomo = await pub.ok('POST', '/api/book', { ...book, pay_method: 'orange', payment_ref: 'OM-55443322' });
+    assert.match(pubMomo.tracking, /^FX-/); assert.match(pubMomo.otp, /^\d{4}$/);
+    assert.equal(pubMomo.payment_status, 'en_attente');
+    assert.equal((await admin.call('POST', `/api/admin/shipments/${pubMomo.tracking}/assign`, { driver_id: gm.id })).status, 402);
+    await agent.ok('POST', `/api/agency/shipments/${pubMomo.tracking}/confirm-payment`, { method: 'orange' });
+    await admin.ok('POST', `/api/admin/shipments/${pubMomo.tracking}/assign`, { driver_id: gm.id });
+    const picked = await driver2.ok('POST', `/api/driver/shipments/${pubMomo.tracking}/pickup`, {});
+    assert.equal(picked.status, 'ramasse');
+    pubCash = await pub.ok('POST', '/api/book', { ...book, from_landmark: '', pay_method: 'cash' });
+    const dep = await agent.ok('POST', `/api/agency/shipments/${pubCash.tracking}/confirm-payment`, { method: 'cash', deposit: true });
+    assert.equal(dep.status, 'en_agence'); assert.equal(dep.payment_status, 'paye');
+    const sms = await admin.ok('GET', '/api/admin/sms');
+    assert.ok(sms.some((m) => m.message.includes('Paiement de') && m.message.includes(pubCash.tracking)));
   });
   await step('vente d’articles et de services, stock et reçu', async () => {
     const info = await agent.ok('GET', '/api/agency/info');
@@ -224,12 +264,12 @@ try {
   await step('remise de caisse : livreur avec écart, agence', async () => {
     const c = await admin.ok('GET', '/api/admin/cash');
     const jkCash = c.open.find((o) => o.holder_type === 'livreur' && o.holder_id === jk.id);
-    assert.equal(jkCash.cash_fc, 64000);
-    const close = await admin.ok('POST', '/api/admin/cash/close', { holder_type: 'livreur', holder_id: jk.id, given_cash_fc: 60000, note: 'Manque 4 000' });
+    assert.equal(jkCash.cash_fc, 50000);
+    const close = await admin.ok('POST', '/api/admin/cash/close', { holder_type: 'livreur', holder_id: jk.id, given_cash_fc: 46000, note: 'Manque 4 000' });
     assert.equal(close.gap_fc, -4000);
     assert.equal((await admin.call('POST', '/api/admin/cash/close', { holder_type: 'livreur', holder_id: jk.id, given_cash_fc: 0 })).status, 409);
-    const ag = await agent.ok('POST', '/api/agency/close', { given_cash_fc: 10000 });
-    assert.equal(ag.expected_cash_fc, 10000); assert.equal(ag.mobile_fc, 10000); assert.equal(ag.gap_fc, 0);
+    const ag = await agent.ok('POST', '/api/agency/close', { given_cash_fc: s3.price_fc + pubCash.price_fc });
+    assert.equal(ag.expected_cash_fc, s3.price_fc + pubCash.price_fc); assert.equal(ag.mobile_fc, 10000 + pubMomo.price_fc); assert.equal(ag.gap_fc, 0);
     const c2 = await admin.ok('GET', '/api/admin/cash');
     assert.equal(c2.drivers.find((d) => d.id === jk.id).delivered, 2);
   });
@@ -245,33 +285,28 @@ try {
   });
 
   console.log('Réglages');
-  await step('changement de tarif appliqué au devis', async () => {
-    await admin.ok('PUT', '/api/admin/rates', { rates: [{ zone: 1, size: 'petit', price_fc: 4500 }], settings: { express_supplement_fc: 6000 } });
-    const q = await pub.ok('POST', '/api/quote', { from_commune: 'Gombe', to_commune: 'Gombe', size: 'petit', express: true });
-    assert.equal(q.price_fc, 10500);
-  });
-  await step('prix comme Uber : distance, zone occupée, heure de pointe', async () => {
-    await admin.ok('PUT', '/api/admin/rates', { settings: { pricing_mode: 'distance', surge_on: '1', traffic_pct: 0,
-      busy_score: 1, very_busy_score: 1000, busy_pct: 20, km_fc: 700, base_petit_fc: 3000 } });
-    const near = await pub.ok('POST', '/api/quote', { from_commune: 'Gombe', to_commune: 'Gombe', size: 'petit', from_lat: -4.305, from_lng: 15.305, to_lat: -4.31, to_lng: 15.31 });
+  await step('réglages du calcul appliqués au devis, heure de pointe = trajet plus long', async () => {
+    await admin.ok('PUT', '/api/admin/rates', { settings: { express_supplement_fc: 6000, fuel_price_fc: 3000, minute_fc: 150 } });
+    const pts = { from_commune: 'Gombe', to_commune: 'Gombe', size: 'petit', from_lat: -4.305, from_lng: 15.305, to_lat: -4.33, to_lng: 15.33 };
+    const q = await pub.ok('POST', '/api/quote', { ...pts, express: true });
+    const up = (x) => Math.ceil(x / 100) * 100, min = Math.round(q.distance_km / 30 * 60);
+    assert.equal(q.price_fc, 3000 + up(q.distance_km * 0.03 * 3000) + up(min * 150) + 6000);
     const far = await pub.ok('POST', '/api/quote', { from_commune: 'Gombe', to_commune: 'Nsele', size: 'petit' });
-    assert.equal(near.mode, 'distance');
-    assert.ok(far.distance_km > 15 && far.price_fc > near.price_fc + 10000, 'plus loin = plus cher');
+    assert.ok(far.distance_km > 15 && far.price_fc > q.price_fc, 'plus loin = plus cher');
     const grand = await pub.ok('POST', '/api/quote', { from_commune: 'Gombe', to_commune: 'Nsele', size: 'grand' });
-    assert.ok(grand.price_fc > far.price_fc);
-    // Kalamu a des envois récents et aucun livreur proche : zone occupée, +20 %.
-    const heat = await driver.ok('GET', '/api/heatmap');
-    assert.equal(heat.communes.find((c) => c.name === 'Kalamu').level, 1);
-    assert.equal(heat.communes.find((c) => c.name === 'Maluku').level, 0);
-    const busy = await pub.ok('POST', '/api/quote', { from_commune: 'Kalamu', to_commune: 'Limete', size: 'petit' });
-    assert.equal(busy.surge.pct, 20);
-    assert.ok(busy.lines.some((l) => l.label.startsWith('Forte demande à Kalamu')));
-    await admin.ok('PUT', '/api/admin/rates', { settings: { traffic_pct: 15, traffic_hours: '0-24' } });
-    const rush = await pub.ok('POST', '/api/quote', { from_commune: 'Kalamu', to_commune: 'Limete', size: 'petit' });
-    const sunday = new Date().getUTCDay() === 0;
-    assert.equal(rush.surge.pct, sunday ? 20 : 35);
-    assert.equal((await pub.call('GET', '/api/heatmap')).status, 401);
-    await admin.ok('PUT', '/api/admin/rates', { settings: { pricing_mode: 'zone', surge_on: '0', traffic_hours: '6-9,16-19' } });
+    assert.equal(grand.price_fc - far.price_fc, 3000); // seule la prise en charge change
+    await admin.ok('PUT', '/api/admin/rates', { settings: { rush_hours: '0-24' } });
+    const rush = await pub.ok('POST', '/api/quote', { from_commune: 'Gombe', to_commune: 'Nsele', size: 'petit' });
+    const sunday = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Kinshasa', weekday: 'short' }).format(new Date()) === 'Sun';
+    if (!sunday) {
+      assert.equal(rush.minutes, Math.round(rush.distance_km / 18 * 60));
+      assert.ok(rush.price_fc > far.price_fc && rush.lines.some((l) => l.label.includes('heure de pointe')));
+    }
+    assert.ok(!JSON.stringify(rush).includes('%'));
+    const heat = await admin.ok('GET', '/api/admin/../heatmap');
+    assert.ok(heat.communes.every((c) => c.pct === undefined));
+    assert.equal((await driver.call('GET', '/api/heatmap')).status, 403);
+    await admin.ok('PUT', '/api/admin/rates', { settings: { rush_hours: '', fuel_price_fc: 2640, minute_fc: 100 } });
   });
   await step('mon compte admin : mot de passe et numéro', async () => {
     assert.equal((await admin.call('POST', '/api/me/password', { current: 'faux', password: 'nouveau123' })).status, 400);
@@ -285,7 +320,7 @@ try {
     assert.equal(d.delivered_today, 3);
     assert.equal(d.sales_today_fc, 10000);
     const rep = await admin.ok('GET', '/api/admin/report');
-    assert.equal(rep[0].shipments, 4);
+    assert.equal(rep[0].shipments, 6);
   });
   await step('nouvel agent, nouveau point relais, nouvel article', async () => {
     const a = await admin.ok('POST', '/api/admin/agencies', { name: 'Relais Masina', kind: 'relais', commune: 'Masina', commission_pct: 10 });

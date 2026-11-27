@@ -93,15 +93,25 @@ Sans nom de domaine, le site marche quand même en HTTPS, avec une adresse gratu
 
 **Mettre à jour plus tard** : renvoie le nouveau zip, puis tape `unzip -o fenix-delivery.zip -d fenix && bash fenix/deploy/install.sh`. Les données sont gardées.
 
-## 5 bis. Prix comme Uber (distance, zones occupées, heure de pointe)
+## 5 bis. Prix calculé pour chaque trajet, payé avant l'envoi
 
-- **Prix = prise en charge + prix au km.** Départ : petit 3 000 FC, moyen 4 000, grand 6 000, plus 700 FC par km (×1,25 moyen, ×1,6 grand). La distance part du point GPS, sinon du centre de la commune.
-- **Zones occupées (violet)** : beaucoup de colis et peu de livreurs dans une commune ⇒ prix +20 % (occupé) ou +40 % (très occupé).
-- **Heure de pointe** (6 h–9 h et 16 h–19 h, sauf dimanche) : +15 %.
-- **Plafond** : +50 % au maximum.
-- Le livreur voit la carte violette (bouton **Zones**) et va où ça paie plus. Sa part augmente avec le prix.
-- Tout se règle dans *Back office › Tarifs et réglages › Prix comme Uber*. On peut revenir à l'ancien tableau par zone.
-- Le trafic se calcule avec les heures de pointe. Le trafic **en direct** demande Google Maps, qui est payant : ce n'est pas activé.
+**Le prix** = prise en charge + carburant + temps de trajet. Il n'y a aucun supplément en %.
+- Prise en charge : petit 3 000 FC, moyen 4 000 FC, grand 6 000 FC.
+- Carburant : distance × 0,03 L/km × prix du litre (2 640 FC au départ).
+- Temps : distance ÷ vitesse (30 km/h, ou 18 km/h aux heures de pointe 6-9 h et 16-19 h, sauf le dimanche) × 100 FC la minute.
+- La distance part du point GPS, sinon du centre de la commune, puis on applique le détour moyen par la route (× 1,35).
+- Tout se règle dans *Back office › Tarifs et réglages*, avec un bouton d'essai.
+
+**Le paiement se fait avant le départ du colis.**
+- Moyens : M-Pesa, Airtel Money, Orange Money (avec la référence de la transaction) ou espèces au comptoir.
+- Au comptoir, l'agent encaisse : le colis est payé tout de suite.
+- En ligne ou par Mobile Money, le colis est « en attente » jusqu'à la confirmation (*Paiements à confirmer*, au back office ou en agence).
+- Tant qu'un colis n'est pas payé, aucun livreur ne peut le prendre, le dépôt refuse le scan, et il ne peut pas partir.
+- Les commerçants « sur compte » gardent leur facture de la semaine.
+- L'argent de la **marchandise** des commerçants s'encaisse toujours à la livraison.
+- Les numéros Mobile Money de l'entreprise se règlent dans *Tarifs et réglages*.
+
+La carte « Où sont les colis » du back office aide à envoyer les livreurs au bon endroit. Elle ne change pas le prix.
 
 ## 6. Notifications automatiques (SMS + e-mail)
 

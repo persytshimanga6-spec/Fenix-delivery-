@@ -4,7 +4,7 @@ import { db, tx, setting } from '../db.js';
 import { fail, STATUS_LABELS, today, newOtp } from '../logic.js';
 import { notifyNewCode, notifyMerchant } from '../notify.js';
 import { hash, normPhone } from '../auth.js';
-import { createShipment, mustGet, move, depotScan, amountDue } from '../shipments.js';
+import { createShipment, mustGet, move, depotScan, amountDue, confirmPayment } from '../shipments.js';
 
 const r = express.Router();
 const int = (v) => Math.round(Number(v) || 0);
@@ -30,13 +30,21 @@ r.get('/dashboard', (_req, res) => {
   });
 });
 
+// Paiements en attente (Mobile Money à vérifier sur le téléphone de l'entreprise).
+r.get('/payments', (_req, res) => res.json(db.prepare(`SELECT id, tracking, sender_name, sender_phone, from_commune, to_commune, price_fc,
+  pay_method, payment_ref, created_at FROM shipments WHERE payment_status = 'en_attente' AND status != 'annule' ORDER BY id DESC LIMIT 200`).all()));
+r.post('/shipments/:t/confirm-payment', (req, res) => {
+  const { otp_hash, ...s } = confirmPayment(mustGet(req.params.t), req.user, { method: req.body.method, ref: req.body.ref });
+  res.json(s);
+});
+
 r.get('/shipments', (req, res) => {
   const where = []; const p = {};
   if (req.query.status) { where.push('s.status = @status'); p.status = req.query.status; }
   if (req.query.q) { where.push('(s.tracking LIKE @q OR s.recipient_name LIKE @q OR s.recipient_phone LIKE @q OR s.sender_name LIKE @q)'); p.q = `%${req.query.q}%`; }
   if (req.query.unassigned) where.push("s.driver_id IS NULL AND s.status IN ('cree','en_agence','au_depot','echec','ramasse')");
   const rows = db.prepare(`SELECT s.id, s.tracking, s.sender_name, s.recipient_name, s.recipient_phone, s.from_commune, s.to_commune,
-    s.to_lat, s.to_lng, s.size, s.express, s.price_fc, s.pay_method, s.cod_amount_fc, s.status, s.shelf, s.attempts, s.created_at,
+    s.to_lat, s.to_lng, s.size, s.express, s.price_fc, s.pay_method, s.payment_status, s.payment_ref, s.cod_amount_fc, s.status, s.shelf, s.attempts, s.created_at,
     s.pickup_agency_id, u.name driver_name, s.driver_id
     FROM shipments s LEFT JOIN users u ON u.id = s.driver_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY s.express DESC, s.id DESC LIMIT 500`).all(p);
@@ -57,6 +65,7 @@ r.post('/shipments', async (req, res) => res.status(201).json(await createShipme
 r.post('/shipments/:t/assign', (req, res) => {
   const s = mustGet(req.params.t);
   const d = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'livreur' AND active = 1").get(req.body.driver_id);
+  if (s.payment_status === 'en_attente') fail(402, 'Colis non payé : confirmez d’abord le paiement');
   if (!d) fail(400, 'Livreur inconnu');
   if (!['cree', 'en_agence', 'ramasse', 'au_depot', 'echec'].includes(s.status)) fail(409, 'Ce colis ne peut plus être assigné');
   db.prepare('UPDATE shipments SET driver_id = ? WHERE id = ?').run(d.id, s.id);
@@ -136,8 +145,8 @@ r.put('/rates', (req, res) => {
       db.prepare('UPDATE rates SET price_fc = ? WHERE zone = ? AND size = ?').run(int(x.price_fc), int(x.zone), x.size);
     }
     const allowed = ['company_name', 'express_supplement_fc', 'cod_fee_pct', 'retry_fee_fc', 'insurance_pct', 'driver_share_pct', 'relay_commission_pct',
-      'pricing_mode', 'base_petit_fc', 'base_moyen_fc', 'base_grand_fc', 'km_fc', 'road_factor', 'surge_on', 'busy_score', 'very_busy_score',
-      'busy_pct', 'very_busy_pct', 'traffic_hours', 'traffic_pct', 'surge_max_pct'];
+      'base_petit_fc', 'base_moyen_fc', 'base_grand_fc', 'fuel_price_fc', 'fuel_l_per_km', 'minute_fc', 'speed_normal_kmh', 'speed_rush_kmh',
+      'rush_hours', 'road_factor', 'momo_mpesa', 'momo_orange', 'momo_airtel'];
     for (const [k, v] of Object.entries(req.body.settings || {})) {
       if (allowed.includes(k)) db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(k, String(v));
     }

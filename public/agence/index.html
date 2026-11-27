@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caisse d'agence</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/app.css">
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+<style>
+.prod{display:flex;flex-direction:column;align-items:flex-start;gap:2px;height:auto;min-height:72px;padding:10px 12px;text-align:left}
+.prod small{color:var(--muted);font-weight:500}
+.cartline{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #241A10}
+.qty button{height:32px;width:32px;padding:0}
+</style>
+</head>
+<body>
+<div id="login" class="narrow hidden"><div class="card stack" style="margin-top:40px">
+  <h1>Caisse d'agence</h1>
+  <form class="stack"><label class="f">Téléphone<input name="phone" type="tel" autocomplete="username" required></label>
+  <label class="f">Mot de passe<input name="password" type="password" autocomplete="current-password" required></label>
+  <button class="blue" type="submit">Se connecter</button></form>
+</div></div>
+
+<div id="app" class="hidden">
+  <header class="top"><div class="wrap">
+    <div class="row" style="gap:8px"><span class="brand" data-company>Fenix Delivery</span><span>·</span><span id="agencyName"></span></div>
+    <nav>
+      <a href="#vente">Vente</a><a href="#envoi">Nouvel envoi</a><a href="#retrait">Retrait</a><a href="#reception">Réception</a>
+      <a href="#boites">Boîtes postales</a><a href="#caisse">Caisse</a><a href="#" id="out">Déconnexion</a>
+    </nav>
+  </div></header>
+
+  <main class="wrap">
+    <!-- Vente -->
+    <section data-panel="vente" class="grid2" style="align-items:start;grid-template-columns:minmax(0,2fr) minmax(280px,1fr)">
+      <div class="stack"><input id="search" placeholder="Chercher un article ou un service"><div id="catalog" class="stack"></div></div>
+      <div class="card stack" style="position:sticky;top:12px">
+        <h2>Panier</h2><div id="cart" class="small"></div>
+        <div class="spread"><span>Total</span><strong id="cartTotal" style="font-size:22px">0 FC</strong></div>
+        <div class="pills" id="salePay"></div>
+        <button class="primary big" id="checkout">Encaisser</button>
+      </div>
+    </section>
+
+    <!-- Nouvel envoi au comptoir -->
+    <section data-panel="envoi" class="hidden">
+      <form id="ship" class="grid2" style="align-items:start">
+        <div class="card stack">
+          <div class="label">Expéditeur</div>
+          <label class="f">Nom<input name="sender_name" required></label>
+          <label class="f">Téléphone<input name="sender_phone" type="tel" required></label>
+          <label class="f">E-mail (facultatif)<input name="sender_email" type="email"></label>
+          <div class="label">Destinataire</div>
+          <label class="f">Nom<input name="recipient_name" required></label>
+          <label class="f">Téléphone<input name="recipient_phone" type="tel" required></label>
+          <label class="f">E-mail (facultatif)<input name="recipient_email" type="email"></label>
+          <div class="pills" id="mode"></div>
+          <div id="homeFields" class="stack">
+            <div id="map" class="map"></div>
+            <p class="tiny muted" style="margin:0">Touchez la carte à l'endroit exact (demandez au client de vous montrer).</p>
+            <label class="f">Repère<input name="to_landmark"></label>
+          </div>
+          <label class="f" id="agencyField">Agence de retrait<select name="pickup_agency_id" id="pickupAgency"></select></label>
+          <label class="f">Commune d'arrivée<select name="to_commune" id="toCommune" required></select></label>
+        </div>
+        <div class="card stack">
+          <div class="label">Colis</div><div class="pills" id="size"></div>
+          <label class="f">Poids (kg)<input name="weight_kg" type="number" step="0.1" min="0"></label>
+          <label class="f">Contenu<input name="description"></label>
+          <label class="row small"><input type="checkbox" name="express"> Express</label>
+          <label class="row small"><input type="checkbox" name="insured" id="insured"> Assurance</label>
+          <label class="f hidden" id="valueField">Valeur déclarée (FC)<input name="declared_value_fc" type="number" min="0"></label>
+          <div class="label">Paiement</div><div class="pills" id="shipPay"></div>
+          <div class="card" style="background:var(--bg)"><div id="quoteLines" class="small muted"></div>
+            <div class="spread"><span>Prix</span><strong id="price" style="font-size:22px">—</strong></div></div>
+          <button class="primary big">Enregistrer et imprimer l'étiquette</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Retrait par le destinataire -->
+    <section data-panel="retrait" class="hidden stack">
+      <h1>Colis à remettre</h1>
+      <div class="card scroll"><table><thead><tr><th>N° de suivi</th><th>Destinataire</th><th>À payer</th><th></th></tr></thead><tbody id="waiting"></tbody></table></div>
+      <form id="handover" class="card stack hidden" style="max-width:520px">
+        <h2 id="hTitle"></h2><div id="hInfo" class="small muted"></div>
+        <label class="f">Code du client (reçu par SMS)<input name="otp" inputmode="numeric" maxlength="4" required style="font-size:24px;letter-spacing:.3em"></label>
+        <div id="hPayBox" class="stack"><div class="label">Le client paie avec</div><div class="pills" id="hPay"></div></div>
+        <button class="primary big">Remettre le colis</button>
+      </form>
+    </section>
+
+    <!-- Réception -->
+    <section data-panel="reception" class="hidden stack" style="max-width:640px">
+      <h1>Réception de colis</h1>
+      <p class="muted" style="margin:0" id="recHelp"></p>
+      <form id="rec" class="row card"><input id="recTrk" placeholder="Scannez ou tapez le numéro" style="flex:1"><button class="primary">Valider</button></form>
+      <div id="recOut"></div>
+      <div class="card"><h2>Déposés ici, en attente du livreur</h2><ul id="deposited" class="small"></ul></div>
+    </section>
+
+    <!-- Boîtes postales -->
+    <section data-panel="boites" class="hidden stack">
+      <h1>Boîtes postales</h1>
+      <form id="box" class="card grid" style="align-items:end">
+        <label class="f">N° de boîte<input name="number" required></label><label class="f">Titulaire<input name="holder_name" required></label>
+        <label class="f">Téléphone<input name="holder_phone" required></label><label class="f">Durée (mois)<input name="months" type="number" value="12" min="1"></label>
+        <button class="primary">Attribuer</button>
+      </form>
+      <p class="small muted" style="margin:0">Encaissez l'abonnement dans l'onglet Vente (article « Boîte postale »).</p>
+      <div class="card scroll"><table><thead><tr><th>N°</th><th>Titulaire</th><th>Téléphone</th><th>Expire le</th></tr></thead><tbody id="boxes"></tbody></table></div>
+    </section>
+
+    <!-- Caisse -->
+    <section data-panel="caisse" class="hidden stack" style="max-width:720px">
+      <h1>Caisse du soir</h1>
+      <div class="card" id="cashSummary"></div>
+      <form id="close" class="card stack">
+        <label class="f">Cash compté dans la caisse (FC)<input name="given_cash_fc" type="number" min="0" required></label>
+        <label class="f">Note<input name="note" placeholder="Ex. raison d'un écart"></label>
+        <button class="blue big">Clôturer la caisse</button>
+      </form>
+      <div class="card"><h2>Ventes du jour</h2><ul id="sales" class="small"></ul></div>
+    </section>
+  </main>
+</div>
+<script src="/vendor/leaflet/leaflet.js"></script>
+<script type="module" src="/agence/agence.js"></script>
+</body>
+</html>

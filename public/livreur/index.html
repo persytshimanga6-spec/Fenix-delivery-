@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#110B06">
+<link rel="manifest" href="/livreur/manifest.json">
+<title>Appli livreur</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="/assets/app.css">
+<style>
+body{background:var(--night);color:#F5EDE2}
+.card{background:var(--night2);border-color:var(--night3);color:#F5EDE2}
+.muted{color:#A89A88}.label{color:#A89A88}
+button,.btn{background:var(--night3);border-color:#53412D;color:#F5EDE2}
+input,select{background:var(--night);border-color:#53412D;color:#F5EDE2}
+.pill{background:var(--night);color:#F5EDE2;border-color:#53412D}.pill[aria-pressed=true]{background:var(--orange);border-color:var(--orange);color:var(--blue-dark)}
+button.blue,.btn.blue{background:var(--night3);border-color:var(--orange);color:#F5EDE2}
+.bar{height:6px;background:var(--night2)}.bar div{height:6px;background:var(--orange)}
+header.d{padding:14px 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--night2)}
+.due{color:#F4B683;font-weight:700}
+.repere{color:#F4B683}
+#scanBox{background:#000;border-radius:14px;overflow:hidden}
+.net{font-size:12px;padding:4px 10px;border-radius:999px;background:#14532D;color:#BBF7D0;font-weight:700}
+.net.off{background:#7F1D1D;color:#FECACA}
+</style>
+</head>
+<body>
+<div id="login" class="narrow hidden"><div class="card stack" style="margin-top:40px">
+  <h1>Appli livreur</h1>
+  <form class="stack"><label class="f" style="color:#E5D6C2">Téléphone<input name="phone" type="tel" autocomplete="username" required></label>
+  <label class="f" style="color:#E5D6C2">Mot de passe<input name="password" type="password" autocomplete="current-password" required></label>
+  <button class="primary" type="submit">Se connecter</button></form>
+</div></div>
+
+<div id="app" class="hidden">
+  <header class="d">
+    <div><div class="brand" style="font-size:18px"><span data-company>Fenix Delivery</span> Livreur</div><div class="small muted" id="summary"></div></div>
+    <div class="row" style="gap:8px"><span class="net" id="net">En ligne</span><button id="out" class="ghost" style="height:36px">Quitter</button></div>
+  </header>
+  <div class="bar"><div id="progress" style="width:0"></div></div>
+  <main class="narrow stack">
+    <div class="row" style="gap:8px">
+      <button class="primary" id="scanBtn" style="flex:1">Scanner un colis</button>
+      <button id="zonesBtn">Zones</button>
+      <button id="cashBtn">Ma caisse</button>
+      <button id="refresh" aria-label="Actualiser">↻</button>
+    </div>
+    <div id="scanArea" class="card stack hidden">
+      <div id="scanBox"></div>
+      <form id="manual" class="row" style="gap:8px"><input id="manualTrk" placeholder="Ou tapez le numéro" style="flex:1"><button type="submit">OK</button></form>
+      <button id="scanClose">Fermer</button>
+    </div>
+    <div id="zonesArea" class="card stack hidden">
+      <div class="spread"><strong>Zones occupées</strong><span class="surge" id="zSurge">Prix normal</span></div>
+      <div id="zMap" class="map" style="height:320px"></div>
+      <div id="zInfo" class="stack" style="gap:6px"></div>
+    </div>
+    <div id="cashArea" class="card hidden"></div>
+    <div id="list" class="stack"></div>
+  </main>
+</div>
+
+<dialog id="deliver"><form class="card stack" method="dialog" id="deliverForm">
+  <h2>Remise du colis</h2>
+  <div id="dInfo" class="small muted"></div>
+  <label class="f" style="color:#E5D6C2">Code donné par le client<input name="otp" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required style="font-size:24px;letter-spacing:.3em"></label>
+  <div id="dPayBox" class="stack"><div class="label">Le client a payé avec</div><div class="pills" id="dPay"></div></div>
+  <label class="f" style="color:#E5D6C2">Photo du colis remis<input name="photo" type="file" accept="image/*" capture="environment"></label>
+  <div class="row"><button type="button" id="dCancel">Annuler</button><button class="primary" type="submit" style="flex:1">Confirmer la livraison</button></div>
+</form></dialog>
+
+<dialog id="failDlg"><form class="card stack" method="dialog" id="failForm">
+  <h2>Signaler un échec</h2>
+  <div class="pills" id="reasons"></div>
+  <label class="f" style="color:#E5D6C2">Autre raison<input name="other"></label>
+  <div class="row"><button type="button" id="fCancel">Annuler</button><button class="primary" type="submit" style="flex:1">Envoyer</button></div>
+</form></dialog>
+
+<script src="/vendor/leaflet/leaflet.js"></script>
+<script src="/vendor/html5-qrcode/html5-qrcode.min.js"></script>
+<script type="module">
+import { $, $$, api, esc, fc, toast, run, pills, requireLogin, logout, PAY, heatMap, heatLegend } from '/assets/app.js';
+const cfg = await api('/api/config');
+$$('[data-company]').forEach((e) => (e.textContent = cfg.company));
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/livreur/sw.js').catch(() => {});
+
+let items = [], pos = { lat: null, lng: null }, current = null, payMethod = 'cash', reason = '';
+
+// ---------- Hors connexion : les actions simples attendent le réseau ----------
+const QKEY = 'kc_queue';
+const queue = () => JSON.parse(localStorage.getItem(QKEY) || '[]');
+const setQueue = (q) => localStorage.setItem(QKEY, JSON.stringify(q));
+async function act(url, body, label) {
+  try {
+    if (!navigator.onLine) throw Object.assign(new Error('hors ligne'), { offline: true });
+    return await api(url, { method: 'POST', body });
+  } catch (e) {
+    if (e.offline || e instanceof TypeError) {
+      setQueue([...queue(), { url, body, label, at: Date.now() }]);
+      toast(`Pas de réseau : « ${label} » sera envoyé dès le retour du réseau`);
+      return null;
+    }
+    throw e;
+  }
+}
+async function flush() {
+  const q = queue(); if (!q.length || !navigator.onLine) return;
+  const left = [];
+  for (const a of q) {
+    try { await api(a.url, { method: 'POST', body: { ...a.body, offline_at: a.at } }); }
+    catch (e) { if (e instanceof TypeError) left.push(a); else toast(`${a.label} : ${e.message}`, true); }
+  }
+  setQueue(left);
+  if (q.length !== left.length) { toast('Actions hors ligne envoyées'); load(); }
+}
+const netState = () => { $('#net').textContent = navigator.onLine ? (queue().length ? `${queue().length} en attente` : 'En ligne') : 'Hors ligne'; $('#net').classList.toggle('off', !navigator.onLine); };
+addEventListener('online', () => { netState(); flush(); });
+addEventListener('offline', netState);
+
+// ---------- Position GPS (partagée tant que l'appli est ouverte : sert au suivi et à la carte des zones) ----------
+function watchGps() {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.watchPosition((p) => { pos = { lat: p.coords.latitude, lng: p.coords.longitude }; }, () => {}, { enableHighAccuracy: true, maximumAge: 30000 });
+  setInterval(() => {
+    if (pos.lat && navigator.onLine) api('/api/driver/location', { method: 'POST', body: pos }).catch(() => {});
+  }, 60000);
+}
+
+// ---------- Liste ----------
+const nav = (lat, lng) => lat ? `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving` : null;
+function card(s) {
+  const atAgency = s.status === 'en_agence';
+  const pickup = s.status === 'cree' || atAgency;
+  const toAgency = !!s.pickup_agency_id;
+  const target = atAgency ? [s.deposit_agency_lat, s.deposit_agency_lng] : pickup ? [s.from_lat, s.from_lng] : toAgency ? [s.pickup_agency_lat, s.pickup_agency_lng] : [s.to_lat, s.to_lng];
+  const link = nav(...target);
+  const phone = pickup && !atAgency ? s.sender_phone : s.recipient_phone;
+  let main = '';
+  if (pickup) main = `<button class="primary big" data-a="pickup">Scanner au ramassage</button>`;
+  else if (['ramasse', 'au_depot', 'echec'].includes(s.status)) main = `<button class="primary big" data-a="start">Partir en livraison</button>`;
+  else if (s.status === 'en_livraison' && toAgency) main = `<button class="primary big" data-a="drop">Déposé à l'agence</button>`;
+  else if (s.status === 'en_livraison') main = `<button class="primary big" data-a="deliver">Livrer (code du client)</button>`;
+  return `<article class="card stack" data-t="${esc(s.tracking)}">
+    <div class="spread"><span class="small muted">${esc(s.tracking)}${s.express ? ' · <strong style="color:#F4B683">EXPRESS</strong>' : ''}</span><strong style="color:#F4B683">${esc(s.label)}</strong></div>
+    ${pickup
+      ? atAgency
+        ? `<div><div class="tiny muted">Ramasser à l'agence</div><strong>${esc(s.deposit_agency_name)}</strong></div>`
+        : `<div><div class="tiny muted">Ramasser chez</div><strong>${esc(s.sender_name)}</strong> · ${esc(s.from_commune)}<div class="repere small">${esc(s.from_landmark || '')}</div></div>`
+      : toAgency
+        ? `<div><div class="tiny muted">Déposer à l'agence</div><strong>${esc(s.pickup_agency_name)}</strong></div>`
+        : `<div><div class="tiny muted">Livrer à</div><strong>${esc(s.recipient_name)}</strong> · ${esc(s.to_commune)}<div class="repere small">Repère : ${esc(s.to_landmark || '')}</div></div>`}
+    ${s.shelf ? `<div class="tiny muted">Étagère : ${esc(s.shelf)}</div>` : ''}
+    ${!pickup && !toAgency && s.due.total ? `<div class="due">À encaisser : ${fc(s.due.total)}</div>` : ''}
+    ${s.attempts ? `<div class="tiny muted">Tentatives : ${s.attempts}</div>` : ''}
+    <div class="row" style="gap:8px">
+      ${link ? `<a class="btn blue" style="flex:1" href="${link}" target="_blank" rel="noopener">Naviguer</a>` : ''}
+      <a class="btn" style="flex:1" href="tel:${esc(phone)}">Appeler</a>
+      ${s.status === 'en_livraison' && !toAgency ? '<button data-a="fail" style="flex:1">Échec</button>' : ''}
+    </div>
+    ${main}
+  </article>`;
+}
+const load = run(async () => {
+  const r = await api('/api/driver/shipments');
+  items = r.shipments;
+  const total = items.length + r.done_today;
+  $('#summary').textContent = `${r.done_today} livré(s) aujourd'hui · ${items.length} en cours`;
+  $('#progress').style.width = total ? `${Math.round((r.done_today / total) * 100)}%` : '0';
+  $('#list').innerHTML = items.map(card).join('') || '<div class="card muted">Aucun colis pour l’instant. Actualisez plus tard.</div>';
+  netState();
+});
+
+$('#list').onclick = run(async (e) => {
+  const b = e.target.closest('button[data-a]'); if (!b) return;
+  const t = b.closest('[data-t]').dataset.t; const s = items.find((x) => x.tracking === t);
+  const a = b.dataset.a;
+  if (a === 'pickup') { current = s; return openScan(); }
+  if (a === 'start') { await act(`/api/driver/shipments/${t}/start`, pos, 'Départ en livraison'); toast('Bonne route !'); }
+  if (a === 'drop') { await api(`/api/driver/shipments/${t}/drop-agency`, { method: 'POST', body: pos }); toast('Colis déposé à l’agence'); }
+  if (a === 'deliver') return openDeliver(s);
+  if (a === 'fail') { current = s; reason = ''; $('#failForm').reset(); return $('#failDlg').showModal(); }
+  load();
+});
+
+// ---------- Scan QR (ramassage, ou retrouver un colis) ----------
+let scanner;
+async function handleCode(code) {
+  const t = String(code).trim().toUpperCase();
+  await closeScan();
+  const s = items.find((x) => x.tracking === t);
+  if (!s) return toast(`${t} n'est pas dans votre tournée`, true);
+  if (current && current.tracking !== t) { current = null; return toast('Ce n’est pas le bon colis', true); }
+  if (s.status === 'cree' || s.status === 'en_agence') { await act(`/api/driver/shipments/${t}/pickup`, pos, 'Ramassage'); toast(`${t} ramassé`); current = null; return load(); }
+  current = null;
+  document.querySelector(`[data-t="${t}"]`)?.scrollIntoView({ behavior: 'smooth' });
+}
+async function openScan() {
+  $('#scanArea').classList.remove('hidden');
+  try {
+    scanner = new Html5Qrcode('scanBox');
+    await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: 220 }, (txt) => run(handleCode)(txt));
+  } catch { toast('Caméra indisponible : tapez le numéro', true); }
+}
+async function closeScan() {
+  try { if (scanner?.isScanning) await scanner.stop(); } catch { /* déjà arrêté */ }
+  $('#scanArea').classList.add('hidden');
+}
+$('#scanBtn').onclick = () => { current = null; openScan(); };
+$('#scanClose').onclick = () => { current = null; closeScan(); };
+$('#manual').onsubmit = (e) => { e.preventDefault(); run(handleCode)($('#manualTrk').value); $('#manualTrk').value = ''; };
+
+// ---------- Livraison ----------
+function openDeliver(s) {
+  current = s; payMethod = 'cash';
+  $('#deliverForm').reset();
+  $('#dInfo').innerHTML = `${esc(s.tracking)} · ${esc(s.recipient_name)}${s.due.total ? `<div class="due" style="font-size:18px">Encaisser : ${fc(s.due.total)}</div>` : '<div>Rien à encaisser</div>'}`;
+  $('#dPayBox').classList.toggle('hidden', !s.due.total);
+  pills($('#dPay'), ['cash', 'mpesa', 'orange', 'airtel'].map((m) => [m, PAY[m]]), payMethod, (v) => (payMethod = v));
+  $('#deliver').showModal();
+}
+$('#dCancel').onclick = () => $('#deliver').close();
+$('#deliverForm').onsubmit = run(async (e) => {
+  e.preventDefault();
+  if (!navigator.onLine) throw new Error('Pas de réseau : la livraison doit être confirmée en ligne (le code est vérifié par le serveur)');
+  const f = new FormData(e.target);
+  const form = new FormData();
+  form.append('otp', f.get('otp')); form.append('method', payMethod);
+  if (pos.lat) { form.append('lat', pos.lat); form.append('lng', pos.lng); }
+  const photo = f.get('photo'); if (photo && photo.size) form.append('photo', photo);
+  await api(`/api/driver/shipments/${current.tracking}/deliver`, { method: 'POST', form });
+  $('#deliver').close(); toast('Livraison confirmée ✓'); load();
+});
+
+// ---------- Échec ----------
+pills($('#reasons'), ['Client absent', 'Téléphone éteint', 'Adresse introuvable', 'Client refuse le colis', 'Client n’a pas l’argent'].map((x) => [x, x]), '', (v) => (reason = v));
+$('#fCancel').onclick = () => $('#failDlg').close();
+$('#failForm').onsubmit = run(async (e) => {
+  e.preventDefault();
+  const r = new FormData(e.target).get('other') || reason;
+  if (!r) throw new Error('Choisissez une raison');
+  await act(`/api/driver/shipments/${current.tracking}/fail`, { reason: r, ...pos }, 'Échec de livraison');
+  $('#failDlg').close(); toast('Échec signalé, le client est prévenu par SMS'); load();
+});
+
+// ---------- Caisse ----------
+$('#cashBtn').onclick = run(async () => {
+  const box = $('#cashArea');
+  if (!box.classList.contains('hidden')) return box.classList.add('hidden');
+  const rows = await api('/api/driver/cash');
+  const total = rows.reduce((s, r) => s + r.total, 0);
+  box.innerHTML = `<div class="label">À rendre ce soir</div>${rows.map((r) => `<div class="spread"><span>${esc(PAY[r.method])}</span><strong>${fc(r.total)}</strong></div>`).join('') || '<div class="muted">Rien pour l’instant</div>'}
+    <div class="spread" style="margin-top:8px;border-top:1px solid var(--night3);padding-top:8px"><span>Total encaissé</span><strong>${fc(total)}</strong></div>`;
+  box.classList.remove('hidden');
+});
+
+$('#refresh').onclick = () => { flush(); load(); };
+// Zones occupées : violet = beaucoup de colis et peu de livreurs. Les courses y sont mieux payées.
+let zones = null;
+$('#zonesBtn').onclick = () => {
+  const box = $('#zonesArea'); box.classList.toggle('hidden');
+  if (box.classList.contains('hidden')) return;
+  if (!zones) zones = heatMap($('#zMap'), { onData: (d) => {
+    $('#zInfo').innerHTML = heatLegend(d);
+    const top = Math.max(0, ...d.communes.map((c) => c.pct)) + d.traffic.pct;
+    $('#zSurge').textContent = top ? `Jusqu’à +${Math.min(top, 50)} %` : 'Prix normal';
+  } });
+  setTimeout(() => zones.map.invalidateSize(), 50);
+};
+$('#out').onclick = logout;
+requireLogin(['livreur'], () => { watchGps(); load(); flush(); setInterval(load, 120000); });
+</script>
+</body>
+</html>

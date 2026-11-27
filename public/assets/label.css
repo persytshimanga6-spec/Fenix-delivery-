@@ -1,0 +1,13 @@
+body{margin:0;font-family:system-ui,sans-serif;color:#000}
+.label{width:100mm;padding:4mm;border:1px solid #000;margin:6mm auto;display:flex;flex-direction:column;gap:3mm;font-size:12px}
+.label .top{display:flex;justify-content:space-between;font-size:16px;border-bottom:2px solid #000;padding-bottom:2mm}
+.label .row{display:flex;gap:4mm;align-items:center}
+.label img{width:32mm;height:32mm}
+.label .trk{font-weight:700;font-size:14px}
+.label .big{font-size:22px;font-weight:800}
+.label .box{border:1px solid #000;padding:2mm}
+.label small{font-weight:700}
+.label .due{font-size:16px;font-weight:800;text-align:center;border:2px solid #000;padding:2mm}
+.receipt{width:72mm;margin:4mm auto;font-size:12px;display:flex;flex-direction:column;gap:1mm}
+.receipt .line{display:flex;justify-content:space-between;gap:4mm}
+@media print{.label,.receipt{margin:0}}

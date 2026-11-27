@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Back office</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/app.css">
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+</head>
+<body>
+<div id="login" class="narrow hidden"><div class="card stack" style="margin-top:40px">
+  <h1>Back office</h1>
+  <form class="stack"><label class="f">Téléphone<input name="phone" type="tel" autocomplete="username" required></label>
+  <label class="f">Mot de passe<input name="password" type="password" autocomplete="current-password" required></label>
+  <button class="blue" type="submit">Se connecter</button></form>
+</div></div>
+
+<div id="app" class="sidebar-layout hidden">
+  <nav class="sidebar stack" style="gap:4px" aria-label="Menu">
+    <span class="brand" data-company>Fenix Delivery</span>
+    <button data-go="dashboard">Tableau de bord</button>
+    <button data-go="colis">Colis</button>
+    <button data-go="depot">Dépôt et tri</button>
+    <button data-go="equipe">Livreurs et équipe</button>
+    <button data-go="commercants">Commerçants</button>
+    <button data-go="caisse">Caisse du soir</button>
+    <button data-go="reversements">Reversements</button>
+    <button data-go="agences">Agences et relais</button>
+    <button data-go="articles">Articles et stock</button>
+    <button data-go="tarifs">Tarifs et réglages</button>
+    <button data-go="sms">Notifications</button>
+    <a class="btn" href="/agence/" style="margin-top:12px">Ouvrir la caisse d'agence</a>
+    <button id="out">Déconnexion</button>
+  </nav>
+  <main class="main" id="view"></main>
+</div>
+
+<dialog id="dlg"><div class="card stack" id="dlgBody"></div></dialog>
+
+<script src="/vendor/leaflet/leaflet.js"></script>
+<script type="module" src="/admin/admin.js"></script>
+</body>
+</html>

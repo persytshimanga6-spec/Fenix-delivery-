@@ -1,0 +1,11 @@
+{
+  "name": "Fenix Livreur",
+  "short_name": "Fenix Livreur",
+  "start_url": "/livreur/",
+  "scope": "/livreur/",
+  "display": "standalone",
+  "background_color": "#111526",
+  "theme_color": "#111526",
+  "lang": "fr",
+  "icons": [{ "src": "/livreur/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

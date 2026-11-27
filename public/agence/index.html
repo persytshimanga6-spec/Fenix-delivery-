@@ -25,7 +25,7 @@
   <header class="top"><div class="wrap">
     <div class="row" style="gap:8px"><span class="brand" data-company>Fenix Delivery</span><span>·</span><span id="agencyName"></span></div>
     <nav>
-      <a href="#vente">Vente</a><a href="#envoi">Nouvel envoi</a><a href="#retrait">Retrait</a><a href="#reception">Réception</a>
+      <a href="#vente">Vente</a><a href="#envoi">Nouvel envoi</a><a href="#paiements">Paiements <span id="payCount" class="chip hidden" style="padding:1px 8px;font-size:11px"></span></a><a href="#retrait">Retrait</a><a href="#reception">Réception</a>
       <a href="#boites">Boîtes postales</a><a href="#caisse">Caisse</a><a href="#" id="out">Déconnexion</a>
     </nav>
   </div></header>
@@ -70,9 +70,10 @@
           <label class="row small"><input type="checkbox" name="express"> Express</label>
           <label class="row small"><input type="checkbox" name="insured" id="insured"> Assurance</label>
           <label class="f hidden" id="valueField">Valeur déclarée (FC)<input name="declared_value_fc" type="number" min="0"></label>
-          <div class="label">Paiement</div><div class="pills" id="shipPay"></div>
-          <div class="card" style="background:var(--bg)"><div id="quoteLines" class="small muted"></div>
+          <div class="card" style="background:var(--bg)"><div class="label">Devis du trajet</div><div id="quoteLines" class="small"></div>
             <div class="spread"><span>Prix</span><strong id="price" style="font-size:22px">—</strong></div></div>
+          <div class="label">Paiement, encaissé maintenant</div><div class="pills" id="shipPay"></div>
+          <label class="f hidden" id="shipRefField">Référence Mobile Money<input name="payment_ref" id="shipRef" autocomplete="off" placeholder="Référence reçue par SMS"></label>
           <button class="primary big">Enregistrer et imprimer l'étiquette</button>
         </div>
       </form>
@@ -91,6 +92,14 @@
     </section>
 
     <!-- Réception -->
+    <section data-panel="paiements" class="hidden stack">
+      <h1>Paiements à confirmer</h1>
+      <p class="muted" style="margin:0">Réservations en ligne et envois des commerçants. Un colis ne part qu'une fois payé.
+        Mobile Money : vérifiez la référence sur le téléphone de l'entreprise. Espèces : encaissez, puis confirmez (le colis est déposé ici).</p>
+      <div class="card scroll"><table><thead><tr><th>N° de suivi</th><th>Expéditeur</th><th>Trajet</th><th>Montant</th><th>Moyen · référence</th><th></th></tr></thead>
+        <tbody id="pending"></tbody></table></div>
+    </section>
+
     <section data-panel="reception" class="hidden stack" style="max-width:640px">
       <h1>Réception de colis</h1>
       <p class="muted" style="margin:0" id="recHelp"></p>

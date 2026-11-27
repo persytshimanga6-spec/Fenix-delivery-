@@ -64,6 +64,14 @@ export async function sendEmail(to, subject, lines, meta = {}, link = null) {
   } catch (e) { setStatus(id, 'echec', e.message); }
 }
 
+const MOMO = { mpesa: ['M-Pesa', 'momo_mpesa'], orange: ['Orange Money', 'momo_orange'], airtel: ['Airtel Money', 'momo_airtel'] };
+function payHint(s) {
+  if (s.pay_method === 'cash') return `Paiement en attente : payez ${fc(s.price_fc)} en espèces au comptoir d'une agence ${company()}. Le colis partira après le paiement.`;
+  const [name, key] = MOMO[s.pay_method] || ['Mobile Money', ''];
+  const nb = key ? setting(key, '') : '';
+  return `Paiement ${name} en attente de vérification (réf. ${s.payment_ref || '—'}${nb ? `, numéro ${nb}` : ''}). Le colis partira dès que le paiement est confirmé.`;
+}
+
 // Le vendeur : le commerçant (avec ses préférences) ou l'expéditeur venu au comptoir.
 function seller(s) {
   if (s.merchant_id) {
@@ -98,7 +106,12 @@ export async function notifyShipment(s, event, extra = {}) {
         `Code de livraison : ${extra.otp}. Donnez-le seulement quand vous avez le colis en main.`,
         ...(due ? [`À payer à la réception : ${fc(due)}.`] : [])], mR, link));
       jobs.push(both(S, `Envoi enregistré – ${s.tracking}`, [
-        `Envoi ${s.tracking} enregistré pour ${s.recipient_name} (${s.to_commune}). Prix : ${fc(s.price_fc)}.`], mS, link));
+        `Envoi ${s.tracking} enregistré pour ${s.recipient_name} (${s.to_commune}). Prix : ${fc(s.price_fc)}.`,
+        ...(s.payment_status === 'en_attente' ? [payHint(s)] : [])], mS, link));
+      break;
+    case 'paiement':
+      jobs.push(both(S, `Paiement reçu – ${s.tracking}`, [
+        `Paiement de ${fc(s.price_fc)} reçu pour l'envoi ${s.tracking}. Votre colis peut partir.`], mS, link));
       break;
     case 'ramasse':
       jobs.push(both(S, `Colis ramassé – ${s.tracking}`, [`Votre colis ${s.tracking} a été ramassé par notre livreur.`], mS, link));

@@ -6,7 +6,6 @@
 <link rel="manifest" href="/livreur/manifest.json">
 <title>Appli livreur</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
 <link rel="stylesheet" href="/assets/app.css">
 <style>
 body{background:var(--night);color:#F5EDE2}
@@ -42,7 +41,6 @@ header.d{padding:14px 16px;display:flex;justify-content:space-between;align-item
   <main class="narrow stack">
     <div class="row" style="gap:8px">
       <button class="primary" id="scanBtn" style="flex:1">Scanner un colis</button>
-      <button id="zonesBtn">Zones</button>
       <button id="cashBtn">Ma caisse</button>
       <button id="refresh" aria-label="Actualiser">↻</button>
     </div>
@@ -50,11 +48,6 @@ header.d{padding:14px 16px;display:flex;justify-content:space-between;align-item
       <div id="scanBox"></div>
       <form id="manual" class="row" style="gap:8px"><input id="manualTrk" placeholder="Ou tapez le numéro" style="flex:1"><button type="submit">OK</button></form>
       <button id="scanClose">Fermer</button>
-    </div>
-    <div id="zonesArea" class="card stack hidden">
-      <div class="spread"><strong>Zones occupées</strong><span class="surge" id="zSurge">Prix normal</span></div>
-      <div id="zMap" class="map" style="height:320px"></div>
-      <div id="zInfo" class="stack" style="gap:6px"></div>
     </div>
     <div id="cashArea" class="card hidden"></div>
     <div id="list" class="stack"></div>
@@ -77,10 +70,9 @@ header.d{padding:14px 16px;display:flex;justify-content:space-between;align-item
   <div class="row"><button type="button" id="fCancel">Annuler</button><button class="primary" type="submit" style="flex:1">Envoyer</button></div>
 </form></dialog>
 
-<script src="/vendor/leaflet/leaflet.js"></script>
 <script src="/vendor/html5-qrcode/html5-qrcode.min.js"></script>
 <script type="module">
-import { $, $$, api, esc, fc, toast, run, pills, requireLogin, logout, PAY, heatMap, heatLegend } from '/assets/app.js';
+import { $, $$, api, esc, fc, toast, run, pills, requireLogin, logout, PAY } from '/assets/app.js';
 const cfg = await api('/api/config');
 $$('[data-company]').forEach((e) => (e.textContent = cfg.company));
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/livreur/sw.js').catch(() => {});
@@ -118,7 +110,7 @@ const netState = () => { $('#net').textContent = navigator.onLine ? (queue().len
 addEventListener('online', () => { netState(); flush(); });
 addEventListener('offline', netState);
 
-// ---------- Position GPS (partagée tant que l'appli est ouverte : sert au suivi et à la carte des zones) ----------
+// ---------- Position GPS (partagée tant que l'appli est ouverte : sert au suivi et à l'organisation des livreurs) ----------
 function watchGps() {
   if (!navigator.geolocation) return;
   navigator.geolocation.watchPosition((p) => { pos = { lat: p.coords.latitude, lng: p.coords.longitude }; }, () => {}, { enableHighAccuracy: true, maximumAge: 30000 });
@@ -151,6 +143,7 @@ function card(s) {
         ? `<div><div class="tiny muted">Déposer à l'agence</div><strong>${esc(s.pickup_agency_name)}</strong></div>`
         : `<div><div class="tiny muted">Livrer à</div><strong>${esc(s.recipient_name)}</strong> · ${esc(s.to_commune)}<div class="repere small">Repère : ${esc(s.to_landmark || '')}</div></div>`}
     ${s.shelf ? `<div class="tiny muted">Étagère : ${esc(s.shelf)}</div>` : ''}
+    ${s.payment_status === 'en_attente' ? '<div class="due" style="color:#F4B683">Non payé : ne pas prendre ce colis</div>' : ''}
     ${!pickup && !toAgency && s.due.total ? `<div class="due">À encaisser : ${fc(s.due.total)}</div>` : ''}
     ${s.attempts ? `<div class="tiny muted">Tentatives : ${s.attempts}</div>` : ''}
     <div class="row" style="gap:8px">
@@ -255,18 +248,6 @@ $('#cashBtn').onclick = run(async () => {
 });
 
 $('#refresh').onclick = () => { flush(); load(); };
-// Zones occupées : violet = beaucoup de colis et peu de livreurs. Les courses y sont mieux payées.
-let zones = null;
-$('#zonesBtn').onclick = () => {
-  const box = $('#zonesArea'); box.classList.toggle('hidden');
-  if (box.classList.contains('hidden')) return;
-  if (!zones) zones = heatMap($('#zMap'), { onData: (d) => {
-    $('#zInfo').innerHTML = heatLegend(d);
-    const top = Math.max(0, ...d.communes.map((c) => c.pct)) + d.traffic.pct;
-    $('#zSurge').textContent = top ? `Jusqu’à +${Math.min(top, 50)} %` : 'Prix normal';
-  } });
-  setTimeout(() => zones.map.invalidateSize(), 50);
-};
 $('#out').onclick = logout;
 requireLogin(['livreur'], () => { watchGps(); load(); flush(); setInterval(load, 120000); });
 </script>

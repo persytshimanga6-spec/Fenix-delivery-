@@ -197,6 +197,13 @@ addColumn('merchants', 'email', 'TEXT');
 addColumn('merchants', 'notify_sms', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('merchants', 'notify_email', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('shipments', 'recipient_email', 'TEXT');
+// Paiement avant le départ du colis : paye | en_attente | compte (facture hebdomadaire du commerçant).
+addColumn('shipments', 'payment_status', 'TEXT');
+addColumn('shipments', 'payment_ref', 'TEXT');
+addColumn('shipments', 'paid_at', 'TEXT');
+// Anciens réglages du prix par zone et du supplément dynamique : retirés.
+db.exec(`DELETE FROM settings WHERE key IN ('pricing_mode','km_fc','surge_on','busy_score','very_busy_score','busy_pct',
+  'very_busy_pct','traffic_hours','traffic_pct','surge_max_pct')`);
 addColumn('shipments', 'sender_email', 'TEXT');
 
 export const setting = (key, fallback = null) => {

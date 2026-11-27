@@ -2,7 +2,7 @@
 import express from 'express';
 import { db, tx, setting } from '../db.js';
 import { fail, STATUS_LABELS, MOBILE } from '../logic.js';
-import { createShipment, mustGet, depotScan, handOver, agencyReceive, amountDue } from '../shipments.js';
+import { createShipment, mustGet, depotScan, handOver, agencyReceive, amountDue, confirmPayment } from '../shipments.js';
 import { closeCash } from './admin.js';
 
 const r = express.Router();
@@ -35,6 +35,15 @@ r.get('/info', (req, res) => {
 });
 
 r.post('/shipments', async (req, res) => res.status(201).json(await createShipment(req.body, req.user, { agency: req.agency })));
+
+// Paiements à confirmer : réservations en ligne et envois Mobile Money des commerçants.
+r.get('/payments', (_req, res) => res.json(db.prepare(`SELECT id, tracking, sender_name, sender_phone, from_commune, to_commune, price_fc,
+  pay_method, payment_ref, created_at FROM shipments WHERE payment_status = 'en_attente' AND status != 'annule' ORDER BY id DESC LIMIT 200`).all()));
+r.post('/shipments/:t/confirm-payment', (req, res) => {
+  const { otp_hash, ...s } = confirmPayment(mustGet(req.params.t), req.user,
+    { method: req.body.method, ref: req.body.ref, agency: req.agency, deposit: !!req.body.deposit });
+  res.json({ ...s, label: STATUS_LABELS[s.status] });
+});
 
 r.get('/shipments/:t', (req, res) => {
   const { otp_hash, ...s } = mustGet(req.params.t);

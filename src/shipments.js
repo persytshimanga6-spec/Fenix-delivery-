@@ -2,7 +2,7 @@
 import { db, tx, setting } from './db.js';
 import {
   quote, newTracking, newOtp, checkOtp, addEvent, canMove, fail, shelfFor,
-  SIZES, MOBILE, STATUS_LABELS, publicUrl
+  SIZES, MOBILE, PAY_METHODS, STATUS_LABELS, publicUrl
 } from './logic.js';
 import { normPhone } from './auth.js';
 import { notifyShipment, isEmail } from './notify.js';
@@ -17,9 +17,15 @@ export const getByTracking = (t) => db.prepare('SELECT * FROM shipments WHERE tr
 export const mustGet = (t) => getByTracking(t) || fail(404, 'Colis introuvable');
 
 /**
- * Crée un envoi. `actor` = utilisateur connecté. `ctx.agency` = créé au comptoir d'une agence.
- * pay_method : compte (facturé au commerçant) | cod (le destinataire paie le port)
- *              | cash, mpesa, orange, airtel (payé tout de suite, au comptoir).
+ * Crée un envoi. `actor` = utilisateur connecté (null pour une réservation sur le site public).
+ * `ctx.agency` = créé au comptoir d'une agence. `ctx.public` = réservé en ligne par un client.
+ * Le port est TOUJOURS payé avant le départ du colis :
+ *   compte                 → facture hebdomadaire du commerçant (payment_status « compte »)
+ *   mpesa, orange, airtel  → Mobile Money avec la référence de la transaction
+ *   cash                   → espèces au comptoir d'une agence
+ * Au comptoir, l'agent encaisse lui-même : le colis est payé tout de suite.
+ * Sinon le paiement est « en attente » jusqu'à ce qu'un comptoir ou le siège le confirme ;
+ * en attendant, aucun livreur ne peut le prendre et il ne peut pas partir.
  */
 export async function createShipment(input, actor, ctx = {}) {
   const d = {
@@ -32,22 +38,37 @@ export async function createShipment(input, actor, ctx = {}) {
     to_lat: num(input.to_lat), to_lng: num(input.to_lng),
     size: str(input.size), weight_kg: num(input.weight_kg), description: str(input.description, 300),
     declared_value_fc: int(input.declared_value_fc), insured: input.insured ? 1 : 0, express: input.express ? 1 : 0,
-    cod_amount_fc: int(input.cod_amount_fc), pay_method: str(input.pay_method) || 'cod',
+    cod_amount_fc: int(input.cod_amount_fc), pay_method: str(input.pay_method), payment_ref: str(input.payment_ref, 60),
     pickup_agency_id: num(input.pickup_agency_id)
   };
 
+  const role = actor?.role || 'public';
+
   // Un commerçant envoie toujours depuis sa boutique.
-  if (actor.role === 'commercant') {
+  if (role === 'commercant') {
     const m = db.prepare('SELECT * FROM merchants WHERE id = ?').get(actor.merchant_id);
     if (!m || m.status !== 'actif') fail(403, 'Votre compte commerçant n’est pas encore validé');
     Object.assign(d, {
       sender_name: m.name, sender_phone: m.phone, sender_email: m.email || null, from_commune: m.commune, from_landmark: m.landmark,
       from_lat: m.lat, from_lng: m.lng
     });
-    if (!['compte', 'cod'].includes(d.pay_method)) fail(400, 'Paiement : « compte » ou « cod » pour un commerçant');
+    if (!['compte', ...MOBILE].includes(d.pay_method)) fail(400, 'Paiement : sur votre compte ou par Mobile Money');
+    if (MOBILE.includes(d.pay_method) && (!d.payment_ref || d.payment_ref.length < 4)) fail(400, 'Entrez la référence de la transaction Mobile Money');
     d.merchant_id = m.id;
+  } else if (ctx.public) {
+    d.merchant_id = null;
+    if (!PAY_METHODS.includes(d.pay_method)) fail(400, 'Choisissez le moyen de paiement');
+    if (MOBILE.includes(d.pay_method) && (!d.payment_ref || d.payment_ref.length < 4)) fail(400, 'Entrez la référence de la transaction Mobile Money');
+
+    if (d.cod_amount_fc > 0) fail(400, 'L’encaissement de marchandise est réservé aux commerçants');
+    if (d.pay_method === 'compte') fail(400, 'Paiement par Mobile Money ou en espèces au comptoir');
+    if (!d.from_commune) fail(400, 'Commune de départ obligatoire');
+    if (d.pay_method !== 'cash' && !d.from_landmark) fail(400, 'Indiquez où le livreur doit ramasser le colis (repère)');
   } else {
     d.merchant_id = num(input.merchant_id);
+    if (!PAY_METHODS.includes(d.pay_method)) fail(400, 'Choisissez le moyen de paiement');
+    if (MOBILE.includes(d.pay_method) && (!d.payment_ref || d.payment_ref.length < 4)) fail(400, 'Entrez la référence de la transaction Mobile Money');
+
     if (d.cod_amount_fc > 0 && !d.merchant_id) fail(400, 'L’encaissement de marchandise est réservé aux commerçants');
   }
   if (ctx.agency) {
@@ -55,10 +76,12 @@ export async function createShipment(input, actor, ctx = {}) {
     if (!d.from_commune) d.from_commune = ctx.agency.commune;
     if (!d.from_landmark) d.from_landmark = ctx.agency.name;
     if (d.from_lat == null) { d.from_lat = ctx.agency.lat; d.from_lng = ctx.agency.lng; }
-    if (d.pay_method === 'compte') fail(400, 'Au comptoir : payé tout de suite ou payé à la livraison');
-  } else if (['cash', ...MOBILE].includes(d.pay_method) && actor.role !== 'admin') {
-    fail(400, 'Ce mode de paiement se fait au comptoir d’une agence');
+    if (d.pay_method === 'compte' && !d.merchant_id) fail(400, 'Au comptoir : espèces ou Mobile Money');
+  } else if (d.pay_method === 'compte' && !d.merchant_id) {
+    fail(400, 'Le paiement « sur compte » est réservé aux commerçants');
   }
+  if (d.pay_method === 'compte' && !ctx.public && role !== 'commercant'
+      && db.prepare("SELECT status FROM merchants WHERE id = ?").get(d.merchant_id)?.status !== 'actif') fail(400, 'Commerçant inconnu ou pas encore validé');
 
   for (const [k, label] of [['sender_name', 'Nom de l’expéditeur'], ['sender_phone', 'Téléphone de l’expéditeur'],
     ['recipient_name', 'Nom du destinataire'], ['recipient_phone', 'Téléphone du destinataire'], ['to_commune', 'Commune d’arrivée']]) {
@@ -72,22 +95,25 @@ export async function createShipment(input, actor, ctx = {}) {
   const q = quote(d);
   const tracking = newTracking();
   const { otp, hash } = newOtp(tracking);
-  const paidNow = ['cash', ...MOBILE].includes(d.pay_method);
+  // Le comptoir (ou le siège) encaisse lui-même : payé tout de suite. Ailleurs : en attente de confirmation.
+  const payment_status = d.pay_method === 'compte' ? 'compte' : (ctx.agency || role === 'admin') ? 'paye' : 'en_attente';
+  const paidNow = payment_status === 'paye';
 
   const id = tx(() => {
     const r = db.prepare(`INSERT INTO shipments (tracking, merchant_id, agency_id, pickup_agency_id, sender_name, sender_phone,
       from_commune, from_landmark, from_lat, from_lng, recipient_name, recipient_phone, recipient_email, sender_email, to_commune, to_landmark, to_lat, to_lng,
       size, weight_kg, description, declared_value_fc, insured, express, zone, price_fc, pay_method, shipping_paid, cod_amount_fc,
-      status, otp_hash)
+      status, otp_hash, payment_status, payment_ref, paid_at)
       VALUES (@tracking, @merchant_id, @agency_id, @pickup_agency_id, @sender_name, @sender_phone, @from_commune, @from_landmark,
       @from_lat, @from_lng, @recipient_name, @recipient_phone, @recipient_email, @sender_email, @to_commune, @to_landmark, @to_lat, @to_lng, @size, @weight_kg,
       @description, @declared_value_fc, @insured, @express, @zone, @price_fc, @pay_method, @shipping_paid, @cod_amount_fc,
-      'cree', @otp_hash)`).run({
+      'cree', @otp_hash, @payment_status, @payment_ref, @paid_at)`).run({
       ...d, agency_id: d.agency_id ?? null, merchant_id: d.merchant_id ?? null, tracking, zone: q.zone,
-      price_fc: q.price_fc, shipping_paid: paidNow ? 1 : 0, otp_hash: hash
+      price_fc: q.price_fc, shipping_paid: paidNow ? 1 : 0, otp_hash: hash,
+      payment_status, paid_at: paidNow ? new Date().toISOString() : null
     });
     const sid = r.lastInsertRowid;
-    addEvent(sid, 'cree', actor.id, ctx.agency ? `Créé au comptoir : ${ctx.agency.name}` : null);
+    addEvent(sid, 'cree', actor?.id ?? null, ctx.agency ? `Créé au comptoir : ${ctx.agency.name}` : ctx.public ? 'Réservé en ligne' : null);
     if (ctx.agency) {
       db.prepare("UPDATE shipments SET status = 'en_agence' WHERE id = ?").run(sid);
       addEvent(sid, 'en_agence', actor.id, ctx.agency.name);
@@ -101,11 +127,19 @@ export async function createShipment(input, actor, ctx = {}) {
 
   await notifyShipment(db.prepare('SELECT * FROM shipments WHERE id = ?').get(id), 'cree', { otp }).catch((e) => console.error('Notification', e.message));
 
-  return { ...db.prepare('SELECT * FROM shipments WHERE id = ?').get(id), quote: q, otp_demo: process.env.SHOW_OTP === '1' ? otp : undefined };
+  const out = { ...db.prepare('SELECT * FROM shipments WHERE id = ?').get(id), quote: q, otp_demo: process.env.SHOW_OTP === '1' ? otp : undefined };
+  // Réservation en ligne : le client voit son code tout de suite, pour le donner au destinataire.
+  if (ctx.public) out.otp = otp;
+  delete out.otp_hash;
+  return out;
 }
+
+// Étapes interdites tant que le port n'est pas payé : le colis ne part pas.
+const NEEDS_PAYMENT = ['ramasse', 'en_agence', 'au_depot', 'en_livraison', 'disponible_agence'];
 
 export function move(s, to, actor, { note = null, lat = null, lng = null, patch = {} } = {}) {
   if (!canMove(s.status, to)) fail(409, `Impossible : le colis est « ${STATUS_LABELS[s.status]} »`);
+  if (s.payment_status === 'en_attente' && NEEDS_PAYMENT.includes(to)) fail(402, `Colis ${s.tracking} non payé : le paiement doit être confirmé avant le départ`);
   const sets = Object.keys(patch).map((k) => `${k} = @${k}`);
   db.prepare(`UPDATE shipments SET status = @to${sets.length ? ', ' + sets.join(', ') : ''} WHERE id = @id`).run({ ...patch, to, id: s.id });
   addEvent(s.id, to, actor?.id, note, lat, lng);
@@ -113,6 +147,35 @@ export function move(s, to, actor, { note = null, lat = null, lng = null, patch 
   // Prévient automatiquement le client et le vendeur, après la fin de la transaction.
   setImmediate(() => notifyShipment(fresh, to, { note }).catch((e) => console.error('Notification', e.message)));
   return fresh;
+}
+
+/**
+ * Confirme un paiement en attente (Mobile Money vérifié, ou espèces reçues au comptoir).
+ * Au comptoir, l'argent entre dans la caisse de l'agence. `deposit` : le client dépose le colis maintenant.
+ */
+export function confirmPayment(s, actor, { method, ref, agency = null, deposit = false } = {}) {
+  if (s.payment_status !== 'en_attente') fail(409, s.payment_status === 'compte' ? 'Ce colis est facturé sur le compte du commerçant' : 'Ce colis est déjà payé');
+  const m = method || s.pay_method;
+  if (!['cash', ...MOBILE].includes(m)) fail(400, 'Moyen de paiement invalide');
+  if (m === 'cash' && !agency) fail(400, 'Les espèces se confirment au comptoir d’une agence');
+  const r = str(ref, 60) || s.payment_ref;
+  if (MOBILE.includes(m) && !r) fail(400, 'Référence Mobile Money obligatoire');
+  const updated = tx(() => {
+    db.prepare(`UPDATE shipments SET payment_status = 'paye', shipping_paid = 1, pay_method = ?, payment_ref = ?, paid_at = ? WHERE id = ?`)
+      .run(m, r, new Date().toISOString(), s.id);
+    if (agency) {
+      db.prepare(`INSERT INTO cash (holder_type, holder_id, shipment_id, kind, method, amount_fc) VALUES ('agence', ?, ?, 'port', ?, ?)`)
+        .run(agency.id, s.id, m, s.price_fc);
+    }
+    addEvent(s.id, s.status, actor?.id, `Paiement confirmé : ${s.price_fc} FC (${m}${r ? ` · ${r}` : ''})`);
+    let fresh = db.prepare('SELECT * FROM shipments WHERE id = ?').get(s.id);
+    if (agency && deposit && fresh.status === 'cree') {
+      fresh = move(fresh, 'en_agence', actor, { note: `Déposé au comptoir : ${agency.name}`, patch: { agency_id: agency.id } });
+    }
+    return fresh;
+  })();
+  setImmediate(() => notifyShipment(updated, 'paiement').catch((e) => console.error('Notification', e.message)));
+  return updated;
 }
 
 // Scan au dépôt : le colis reçoit son étagère.
@@ -171,6 +234,7 @@ export function publicTrack(s) {
   return {
     tracking: s.tracking, status: s.status, label: STATUS_LABELS[s.status], from_commune: s.from_commune, to_commune: s.to_commune,
     to_lat: s.status === 'en_livraison' ? s.to_lat : null, to_lng: s.status === 'en_livraison' ? s.to_lng : null,
-    sender: s.sender_name, express: !!s.express, due_fc: amountDue(s).total, events, driver, pickup_agency: pickup
+    sender: s.sender_name, express: !!s.express, due_fc: amountDue(s).total, events, driver, pickup_agency: pickup,
+    payment: s.payment_status === 'en_attente' ? 'en_attente' : 'ok', price_fc: s.payment_status === 'en_attente' ? s.price_fc : undefined
   };
 }

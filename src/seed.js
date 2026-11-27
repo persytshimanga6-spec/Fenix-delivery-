@@ -32,16 +32,16 @@ const SETTINGS = {
   insurance_pct: '1',        // % de la valeur déclarée
   driver_share_pct: '60',    // part du livreur sur le prix du port
   relay_commission_pct: '10',
-  // Prix comme Uber : prise en charge + prix au km, supplément quand c'est occupé ou à l'heure de pointe.
-  pricing_mode: 'distance',  // 'distance' ou 'zone' (ancien tableau par zone)
+  // Prix calculé pour chaque trajet : prise en charge + carburant + temps de trajet.
   base_petit_fc: '3000', base_moyen_fc: '4000', base_grand_fc: '6000',
-  km_fc: '700',              // par km (×1,25 moyen, ×1,6 grand)
-  road_factor: '1.35',       // détour moyen par la route
-  surge_on: '1',
-  busy_score: '3', very_busy_score: '6',   // colis en attente par livreur présent
-  busy_pct: '20', very_busy_pct: '40',
-  traffic_hours: '6-9,16-19', traffic_pct: '15',
-  surge_max_pct: '50'
+  fuel_price_fc: '2640',      // prix du litre d'essence
+  fuel_l_per_km: '0.03',      // consommation moto : 3 L / 100 km
+  minute_fc: '100',           // tarif à la minute de trajet
+  speed_normal_kmh: '30', speed_rush_kmh: '18',
+  rush_hours: '6-9,16-19',    // heures de pointe (sauf dimanche)
+  road_factor: '1.35',        // détour moyen par la route
+  // Numéros Mobile Money de l'entreprise, affichés au client pour payer.
+  momo_mpesa: '', momo_orange: '', momo_airtel: ''
 };
 
 export function ensureBase() {

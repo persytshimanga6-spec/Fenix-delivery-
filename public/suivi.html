@@ -34,7 +34,8 @@ async function show(n) {
       <div class="small muted">N° ${esc(t.tracking)} · de ${esc(t.sender)} (${esc(t.from_commune)}) vers ${esc(t.to_commune)}</div>
       <h1>${esc(t.label)}</h1>
       ${t.pickup_agency ? `<p style="margin:0">À retirer : <strong>${esc(t.pickup_agency.name)}</strong> · ${esc(t.pickup_agency.address || t.pickup_agency.commune || '')}</p>` : ''}
-      ${t.due_fc ? `<p style="margin:0">À payer à la réception : <strong>${fc(t.due_fc)}</strong></p>` : ''}
+      ${t.payment === 'en_attente' ? `<p style="margin:0;color:#F4B683">Paiement de l'envoi en attente de confirmation${t.price_fc ? ` (${fc(t.price_fc)})` : ''} : le colis partira dès qu'il est confirmé.</p>` : ''}
+      ${t.due_fc ? `<p style="margin:0">Marchandise à payer à la réception : <strong>${fc(t.due_fc)}</strong></p>` : ''}
       ${t.driver ? `<p style="margin:0">Votre livreur : <strong>${esc(t.driver.name)}</strong>${t.driver.seen ? ' · position du ' + when(t.driver.seen) : ''}</p>` : ''}
       <div id="map" class="map ${t.driver?.lat ? '' : 'hidden'}"></div>
       <p class="small muted" style="margin:0">Le code de livraison vous a été envoyé par SMS. Donnez-le seulement quand vous avez le colis en main.</p>

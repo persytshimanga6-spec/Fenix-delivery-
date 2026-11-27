@@ -9,7 +9,8 @@ export const when = (s) => {
   const d = new Date(s.includes('T') ? s : s.replace(' ', 'T') + 'Z');
   return d.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 };
-export const PAY = { mpesa: 'M-Pesa', orange: 'Orange Money', airtel: 'Airtel Money', cash: 'Cash', cod: 'Payé à la livraison', compte: 'Sur mon compte' };
+export const PAY = { mpesa: 'M-Pesa', orange: 'Orange Money', airtel: 'Airtel Money', cash: 'Espèces au comptoir', cod: 'Payé à la livraison (ancien)', compte: 'Sur compte (facture)' };
+export const PAY_STATE = { paye: 'Payé', en_attente: 'Paiement en attente', compte: 'Sur compte' };
 
 export async function api(url, { method = 'GET', body, form } = {}) {
   const res = await fetch(url, {
@@ -98,8 +99,7 @@ export const loginHtml = (title) => `<div id="login" class="narrow hidden"><div 
 <label class="f">Mot de passe<input name="password" type="password" autocomplete="current-password" required></label>
 <button class="blue" type="submit">Se connecter</button></form></div></div>`;
 
-// ---------- Carte des zones occupées (comme Uber) ----------
-// Violet clair = occupé (+%), violet foncé = très occupé. Plus il y a de violet, plus il faut de livreurs.
+// ---------- Carte « où sont les colis » (aide pour organiser les livreurs, sans effet sur le prix) ----------
 export const HEAT = ['rgba(168,154,136,.18)', '#A87BEA', '#7B2FD0'];
 export function heatMap(el, { refresh = 60000, onData } = {}) {
   const map = L.map(el, { zoomControl: true }).setView([-4.36, 15.33], 11);
@@ -112,8 +112,8 @@ export function heatMap(el, { refresh = 60000, onData } = {}) {
       L.circle([c.lat, c.lng], {
         radius: c.level ? 1600 + c.level * 500 : 1300, stroke: c.level > 0, color: HEAT[c.level], weight: 2,
         fillColor: HEAT[c.level], fillOpacity: c.level ? 0.45 + c.level * 0.12 : 0.35
-      }).addTo(layer).bindTooltip(`<strong>${esc(c.name)}</strong><br>${c.demand} colis · ${c.drivers} livreur(s)${c.pct ? `<br>Prix +${c.pct} %` : ''}`);
-      if (c.level) L.marker([c.lat, c.lng], { interactive: false, icon: L.divIcon({ className: 'heat-label', html: `+${c.pct}%`, iconSize: [48, 20], iconAnchor: [24, 10] }) }).addTo(layer);
+      }).addTo(layer).bindTooltip(`<strong>${esc(c.name)}</strong><br>${c.demand} colis · ${c.drivers} livreur(s)`);
+      if (c.demand) L.marker([c.lat, c.lng], { interactive: false, icon: L.divIcon({ className: 'heat-label', html: String(c.demand), iconSize: [32, 20], iconAnchor: [16, 10] }) }).addTo(layer);
     }
     onData?.(d);
     return d;
@@ -124,7 +124,13 @@ export function heatMap(el, { refresh = 60000, onData } = {}) {
 }
 export function heatLegend(d) {
   const busy = d.communes.filter((c) => c.level).sort((a, b) => b.level - a.level || b.demand - a.demand);
-  return `<div class="heat-legend"><span><i style="background:${HEAT[0]}"></i>Calme</span><span><i style="background:${HEAT[1]}"></i>Occupé</span><span><i style="background:${HEAT[2]}"></i>Très occupé</span></div>
-    ${d.traffic.on ? `<div class="small" style="color:#C9A6FF">Heure de pointe : prix +${d.traffic.pct} % partout</div>` : ''}
-    <div class="small muted">${busy.length ? 'Allez vers : ' + busy.slice(0, 4).map((c) => `<strong style="color:#F5EDE2">${esc(c.name)}</strong> (+${c.pct} %)`).join(', ') : 'Aucune zone occupée pour l’instant.'}</div>`;
+  return `<div class="heat-legend"><span><i style="background:${HEAT[0]}"></i>Calme</span><span><i style="background:${HEAT[1]}"></i>Chargé</span><span><i style="background:${HEAT[2]}"></i>Très chargé</span></div>
+    <div class="small muted">${busy.length ? 'Envoyer des livreurs vers : ' + busy.slice(0, 4).map((c) => `<strong style="color:#F5EDE2">${esc(c.name)}</strong> (${c.demand} colis)`).join(', ') : 'Aucune commune chargée pour l’instant.'}</div>`;
+}
+
+/** Devis détaillé, ligne par ligne (les lignes sans montant sont des informations). */
+export function quoteLines(q) {
+  return q.lines.map((l) => l.fc == null
+    ? `<div class="spread small muted"><span>${esc(l.label)}</span><span></span></div>`
+    : `<div class="spread"><span>${esc(l.label)}</span><span>${fc(l.fc)}</span></div>`).join('');
 }

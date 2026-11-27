@@ -1,4 +1,4 @@
-import { $, $$, api, esc, fc, when, toast, run, badge, requireLogin, logout, PAY, KIN, fillCommunes, heatMap, heatLegend } from '/assets/app.js';
+import { $, $$, api, esc, fc, when, toast, run, badge, requireLogin, logout, PAY, PAY_STATE, KIN, fillCommunes, heatMap, heatLegend, quoteLines } from '/assets/app.js';
 
 const cfg = await api('/api/config');
 $$('[data-company]').forEach((e) => (e.textContent = cfg.company));
@@ -33,7 +33,7 @@ const pages = {
           ${d.drivers.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.zone || '—')}</td><td>${x.open}</td><td>${x.done}</td><td class="tiny muted">${when(x.last_seen) || '—'}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Aucun livreur</td></tr>'}
           </tbody></table></div>
       </div>
-        <div class="card stack"><div class="spread"><h2>Zones occupées (prix comme Uber)</h2><a href="#" data-go="tarifs" class="small">Régler les prix</a></div>
+        <div class="card stack"><div class="spread"><h2>Où sont les colis</h2><span class="small muted">Pour envoyer les livreurs au bon endroit</span></div>
           <div class="grid2" style="align-items:start"><div id="heat" class="map tall"></div><div id="heatInfo" class="stack"></div></div></div></div>`;
     const map = L.map('map').setView(KIN, 12);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
@@ -41,8 +41,8 @@ const pages = {
     if (window.__heat) window.__heat.stop();
     window.__heat = heatMap($('#heat'), { onData: (h) => {
       const rows = [...h.communes].sort((a, b) => b.level - a.level || b.demand - a.demand).slice(0, 8);
-      $('#heatInfo').innerHTML = heatLegend(h) + `<table><thead><tr><th>Commune</th><th>Colis</th><th>Livreurs</th><th>Prix</th></tr></thead><tbody>
-        ${rows.map((c) => `<tr><td>${esc(c.name)}</td><td>${c.demand}</td><td>${c.drivers}</td><td>${c.pct ? `<span class="surge">+${c.pct} %</span>` : '—'}</td></tr>`).join('')}</tbody></table>`;
+      $('#heatInfo').innerHTML = heatLegend(h) + `<table><thead><tr><th>Commune</th><th>Colis en attente</th><th>Livreurs présents</th></tr></thead><tbody>
+        ${rows.map((c) => `<tr><td>${esc(c.name)}</td><td>${c.demand}</td><td>${c.drivers}</td></tr>`).join('')}</tbody></table>`;
     } });
     const live = await api('/api/admin/shipments?status=en_livraison');
     live.filter((s) => s.to_lat).forEach((s) => L.circleMarker([s.to_lat, s.to_lng], { radius: 7, color: '#F0905A', fillOpacity: 1 }).addTo(map).bindTooltip(`${s.tracking} · ${s.recipient_name}`));
@@ -67,7 +67,7 @@ const pages = {
         <td><a href="#" data-detail="${esc(s.tracking)}">${esc(s.tracking)}</a>${s.express ? ' <span class="badge b-en_livraison">Express</span>' : ''}<div class="tiny muted">${when(s.created_at)}</div></td>
         <td>${esc(s.sender_name)}<div class="tiny muted">${esc(s.from_commune)}</div></td>
         <td>${esc(s.recipient_name)}<div class="tiny muted">${esc(s.to_commune)}${s.pickup_agency_id ? ' · retrait agence' : ''}</div></td>
-        <td>${fc(s.price_fc)}<div class="tiny muted">${esc(PAY[s.pay_method])}</div></td>
+        <td>${fc(s.price_fc)}<div class="tiny muted">${esc(PAY[s.pay_method] || '')}${s.payment_status === 'en_attente' ? ' · <span style="color:#F4B683">non payé</span>' : ''}</div></td>
         <td>${esc(s.driver_name || '—')}</td><td>${badge(s.status, s.label)}${s.shelf ? `<div class="tiny muted">${esc(s.shelf)}</div>` : ''}</td>
         <td>${['cree', 'en_agence', 'ramasse', 'au_depot', 'echec'].includes(s.status) ? `<select data-assign="${esc(s.tracking)}" style="min-width:150px">${driverOptions(s.driver_id)}</select>` : ''}</td></tr>`).join('')
         || '<tr><td colspan="7" class="muted">Aucun colis</td></tr>';
@@ -272,30 +272,33 @@ const pages = {
   async tarifs() {
     const t = await api('/api/admin/rates');
     const S = t.settings;
-    const rate = (z, s) => t.rates.find((r) => r.zone === z && r.size === s)?.price_fc;
-    const ZONES = { 1: 'Zone 1 · même commune', 2: 'Zone 2 · même secteur', 3: 'Zone 3 · autre secteur' };
     const secteurs = [...new Set(t.communes.map((c) => c.secteur))];
+    const field = (name, label, attrs = 'type="number" min="0"') => `<label class="f">${label}<input name="${name}" ${attrs} value="${esc(S[name] ?? '')}"></label>`;
     view.innerHTML = `<form id="f" class="stack" style="gap:20px"><div class="spread"><h1>Tarifs et réglages</h1><button class="primary">Enregistrer</button></div>
-      <div class="card scroll"><h2>Prix par zone (FC)</h2><p class="muted small" style="margin:0 0 8px">Utilisé si « Calcul du prix » = par zone, ou si l'adresse n'a pas de position.</p><table><thead><tr><th>Zone</th><th>Petit</th><th>Moyen</th><th>Grand</th></tr></thead><tbody>
-      ${[1, 2, 3].map((z) => `<tr><td>${ZONES[z]}</td>${['petit', 'moyen', 'grand'].map((s) => `<td><input type="number" min="1" data-z="${z}" data-s="${s}" value="${rate(z, s)}"></td>`).join('')}</tr>`).join('')}
-      </tbody></table></div>
-      <div class="card stack"><h2>Prix comme Uber</h2>
-        <p class="muted small" style="margin:0">Prix = prise en charge + prix au km. Quand une commune a beaucoup de colis et peu de livreurs, ou à l'heure de pointe, le prix monte (plafonné). Le livreur gagne sa part sur ce prix.</p>
+      <div class="card stack"><h2>Prix calculé pour chaque trajet</h2>
+        <p class="muted small" style="margin:0">Prix = prise en charge + carburant + temps de trajet. Carburant = distance × consommation × prix du litre.
+          Temps = distance ÷ vitesse ; à l'heure de pointe la vitesse est plus basse, donc le trajet est plus long. Aucun supplément en %.</p>
         <div class="grid">
-          <label class="f">Calcul du prix<select name="pricing_mode"><option value="distance" ${S.pricing_mode !== 'zone' ? 'selected' : ''}>Par distance (km)</option><option value="zone" ${S.pricing_mode === 'zone' ? 'selected' : ''}>Par zone (tableau ci-dessus)</option></select></label>
-          <label class="f">Prise en charge petit (FC)<input name="base_petit_fc" type="number" value="${esc(S.base_petit_fc)}"></label>
-          <label class="f">Prise en charge moyen (FC)<input name="base_moyen_fc" type="number" value="${esc(S.base_moyen_fc)}"></label>
-          <label class="f">Prise en charge grand (FC)<input name="base_grand_fc" type="number" value="${esc(S.base_grand_fc)}"></label>
-          <label class="f">Prix par km (FC, petit)<input name="km_fc" type="number" value="${esc(S.km_fc)}"></label>
-          <label class="f">Détour par la route (×)<input name="road_factor" type="number" step="0.05" value="${esc(S.road_factor)}"></label>
-          <label class="f">Prix dynamique<select name="surge_on"><option value="1" ${S.surge_on !== '0' ? 'selected' : ''}>Activé</option><option value="0" ${S.surge_on === '0' ? 'selected' : ''}>Désactivé</option></select></label>
-          <label class="f">Occupé à partir de (colis par livreur)<input name="busy_score" type="number" step="0.5" value="${esc(S.busy_score)}"></label>
-          <label class="f">Supplément zone occupée (%)<input name="busy_pct" type="number" value="${esc(S.busy_pct)}"></label>
-          <label class="f">Très occupé à partir de<input name="very_busy_score" type="number" step="0.5" value="${esc(S.very_busy_score)}"></label>
-          <label class="f">Supplément très occupé (%)<input name="very_busy_pct" type="number" value="${esc(S.very_busy_pct)}"></label>
-          <label class="f">Heures de pointe (ex. 6-9,16-19)<input name="traffic_hours" value="${esc(S.traffic_hours)}"></label>
-          <label class="f">Supplément heure de pointe (%)<input name="traffic_pct" type="number" value="${esc(S.traffic_pct)}"></label>
-          <label class="f">Supplément maximum (%)<input name="surge_max_pct" type="number" value="${esc(S.surge_max_pct)}"></label>
+          ${field('base_petit_fc', 'Prise en charge · petit (FC)')}
+          ${field('base_moyen_fc', 'Prise en charge · moyen (FC)')}
+          ${field('base_grand_fc', 'Prise en charge · grand (FC)')}
+          ${field('fuel_price_fc', 'Prix du carburant (FC par litre)')}
+          ${field('fuel_l_per_km', 'Consommation (litres par km)', 'type="number" min="0" step="0.001"')}
+          ${field('minute_fc', 'Tarif à la minute de trajet (FC)')}
+          ${field('speed_normal_kmh', 'Vitesse normale (km/h)')}
+          ${field('speed_rush_kmh', 'Vitesse à l’heure de pointe (km/h)')}
+          ${field('rush_hours', 'Heures de pointe (ex. 6-9,16-19 ; sauf dimanche)', 'type="text"')}
+          ${field('road_factor', 'Détour moyen par la route (×)', 'type="number" min="1" step="0.05"')}
+        </div>
+        <div class="card" style="background:var(--bg)"><div class="label">Essai</div>
+          <div class="grid" style="grid-template-columns:1fr 1fr 120px auto;align-items:end"><select id="tFrom"></select><select id="tTo"></select>
+          <select id="tSize"><option>petit</option><option>moyen</option><option>grand</option></select><button type="button" id="tGo">Calculer</button></div>
+          <div id="tOut" class="small" style="margin-top:8px"></div><p class="tiny muted" style="margin:6px 0 0">Enregistrez d'abord pour essayer les nouveaux réglages.</p></div>
+      </div>
+      <div class="card stack"><h2>Numéros Mobile Money de l'entreprise</h2>
+        <p class="muted small" style="margin:0">Affichés aux clients pour payer avant le départ du colis.</p>
+        <div class="grid">
+          ${field('momo_mpesa', 'M-Pesa', 'type="tel"')}${field('momo_airtel', 'Airtel Money', 'type="tel"')}${field('momo_orange', 'Orange Money', 'type="tel"')}
         </div></div>
       <div class="card grid">
         <label class="f">Nom de la société<input name="company_name" value="${esc(S.company_name)}"></label>
@@ -306,15 +309,40 @@ const pages = {
         <label class="f">Part du livreur (% du prix)<input name="driver_share_pct" type="number" value="${esc(S.driver_share_pct)}"></label>
         <label class="f">Commission point relais (%)<input name="relay_commission_pct" type="number" value="${esc(S.relay_commission_pct)}"></label>
       </div>
-      <div class="card stack"><h2>Secteurs des communes</h2><p class="muted small" style="margin:0">Deux communes du même secteur sont en zone 2. Changez un secteur si deux communes sont en fait proches.</p>
+      <div class="card stack"><h2>Secteurs des communes</h2><p class="muted small" style="margin:0">Servent au tri des colis au dépôt (étagères), pas au prix.</p>
       <div class="grid">${t.communes.map((c) => `<label class="f">${esc(c.name)}<select data-commune="${esc(c.name)}">${secteurs.map((s) => `<option ${s === c.secteur ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select></label>`).join('')}</div></div>
       </form>`;
     $('#f').onsubmit = run(async (e) => {
       e.preventDefault();
       const settings = Object.fromEntries(new FormData(e.target));
-      const rates = $$('[data-z]').map((i) => ({ zone: Number(i.dataset.z), size: i.dataset.s, price_fc: Number(i.value) }));
       const communes = $$('[data-commune]').map((s) => ({ name: s.dataset.commune, secteur: s.value }));
-      await api('/api/admin/rates', { method: 'PUT', body: { rates, settings, communes } }); toast('Tarifs enregistrés');
+      await api('/api/admin/rates', { method: 'PUT', body: { settings, communes } }); toast('Réglages enregistrés');
+    });
+    fillCommunes($('#tFrom'), t.communes); fillCommunes($('#tTo'), t.communes);
+    $('#tFrom').value = 'Gombe'; $('#tTo').value = 'Limete';
+    $('#tGo').onclick = run(async () => {
+      const q = await api('/api/quote', { method: 'POST', body: { from_commune: $('#tFrom').value, to_commune: $('#tTo').value, size: $('#tSize').value } });
+      $('#tOut').innerHTML = quoteLines(q) + `<div class="spread"><strong>Total</strong><strong>${fc(q.price_fc)}</strong></div>`;
+    });
+  },
+
+  async paiements() {
+    const rows = await api('/api/admin/payments');
+    view.innerHTML = `<div class="stack"><h1>Paiements à confirmer</h1>
+      <p class="muted" style="margin:0">Le client paie avant le départ du colis. Vérifiez la référence Mobile Money sur le téléphone de l'entreprise, puis confirmez.
+        Les espèces se confirment au comptoir d'une agence. Tant que ce n'est pas confirmé, aucun livreur ne peut prendre le colis.</p>
+      <div class="card scroll"><table><thead><tr><th>N° de suivi</th><th>Expéditeur</th><th>Trajet</th><th>Montant</th><th>Moyen · référence</th><th></th></tr></thead><tbody>
+      ${rows.map((s) => `<tr><td>${esc(s.tracking)}<div class="tiny muted">${when(s.created_at)}</div></td>
+        <td>${esc(s.sender_name)}<div class="tiny muted">${esc(s.sender_phone)}</div></td><td class="small">${esc(s.from_commune)} → ${esc(s.to_commune)}</td>
+        <td><strong>${fc(s.price_fc)}</strong></td><td class="small">${esc(PAY[s.pay_method] || s.pay_method)}${s.payment_ref ? `<div class="tiny">${esc(s.payment_ref)}</div>` : ''}</td>
+        <td>${s.pay_method === 'cash' ? '<span class="small muted">Au comptoir</span>' : `<button class="primary" data-confirm="${esc(s.tracking)}">Paiement vérifié</button>`}</td></tr>`).join('')
+        || '<tr><td colspan="6" class="muted">Aucun paiement en attente.</td></tr>'}
+      </tbody></table></div></div>`;
+    view.querySelector('tbody').onclick = run(async (e) => {
+      const b = e.target.closest('[data-confirm]'); if (!b) return;
+      if (!confirm(`Confirmer le paiement de ${b.dataset.confirm} ?`)) return;
+      await api(`/api/admin/shipments/${encodeURIComponent(b.dataset.confirm)}/confirm-payment`, { method: 'POST', body: {} });
+      toast('Paiement confirmé'); pages.paiements();
     });
   },
 
@@ -365,7 +393,7 @@ view.addEventListener('click', run(async (e) => {
     <div class="grid2 small">
       <div><div class="label">De</div>${esc(s.sender_name)} · ${esc(s.sender_phone)}<br>${esc(s.from_commune)} · ${esc(s.from_landmark || '')}</div>
       <div><div class="label">À</div>${esc(s.recipient_name)} · ${esc(s.recipient_phone)}<br>${esc(s.to_commune)} · ${esc(s.to_landmark || 'Retrait en agence')}</div>
-      <div><div class="label">Colis</div>${esc(s.size)} · ${esc(s.description || '')}<br>Prix ${fc(s.price_fc)} · ${esc(PAY[s.pay_method])}${s.shipping_paid ? ' (payé)' : ''}</div>
+      <div><div class="label">Colis</div>${esc(s.size)} · ${esc(s.description || '')}<br>Prix ${fc(s.price_fc)} · ${esc(PAY[s.pay_method] || '')} · ${esc(PAY_STATE[s.payment_status] || (s.shipping_paid ? 'Payé' : ''))}${s.payment_ref ? ` · réf. ${esc(s.payment_ref)}` : ''}</div>
       <div><div class="label">À encaisser</div>${fc(s.due.total)}${s.cod_amount_fc ? ` (dont marchandise ${fc(s.cod_amount_fc)})` : ''}</div>
     </div>
     ${s.photo ? `<a href="/photos/${esc(s.photo)}" target="_blank" rel="noopener">Voir la photo de livraison</a>` : ''}

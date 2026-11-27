@@ -4,7 +4,7 @@ import { db, setting } from './db.js';
 import { deliveryPrice } from './pricing.js';
 
 export const SIZES = ['petit', 'moyen', 'grand'];
-export const PAY_METHODS = ['mpesa', 'orange', 'airtel', 'cash', 'cod', 'compte'];
+export const PAY_METHODS = ['mpesa', 'orange', 'airtel', 'cash', 'compte'];
 export const MOBILE = ['mpesa', 'orange', 'airtel'];
 
 export const STATUS_LABELS = {
@@ -44,23 +44,21 @@ export function quote(d) {
   const { from_commune, to_commune, size, express = false, insured = false } = d;
   const declared_value_fc = Number(d.declared_value_fc) || 0, cod_amount_fc = Number(d.cod_amount_fc) || 0;
   if (!SIZES.includes(size)) fail(400, 'Taille de colis invalide');
-  const zone = zoneBetween(from_commune, to_commune);
-  const zoneRate = db.prepare('SELECT price_fc FROM rates WHERE zone = ? AND size = ?').get(zone, size).price_fc;
-  // Prix de la course : distance + demande + heure de pointe (voir pricing.js).
-  const p = deliveryPrice({ ...d, zone }, zoneRate);
+  const zone = zoneBetween(from_commune, to_commune); // sert au tri au dépôt, pas au prix
+  const p = deliveryPrice(d);
   const lines = [...p.lines];
   if (express) lines.push({ label: 'Express (moins de 2 h)', fc: Number(setting('express_supplement_fc', 0)) });
   if (insured && declared_value_fc > 0) lines.push({ label: 'Assurance', fc: Math.ceil(declared_value_fc * Number(setting('insurance_pct', 0)) / 100) });
   if (cod_amount_fc > 0) lines.push({ label: 'Encaissement pour le commerçant', fc: Math.ceil(cod_amount_fc * Number(setting('cod_fee_pct', 0)) / 100) });
   const price_fc = lines.reduce((s, l) => s + (l.fc || 0), 0);
-  return { zone, lines, price_fc, distance_km: p.distance_km, surge: p.surge, mode: p.mode };
+  return { zone, lines, price_fc, distance_km: p.distance_km, minutes: p.minutes, rush: p.rush };
 }
 
 export function newTracking() {
   const d = new Date();
   const mmdd = String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
   for (;;) {
-    const t = `KIN-${mmdd}-${String(crypto.randomInt(0, 1e6)).padStart(6, '0')}`;
+    const t = `FX-${mmdd}-${String(crypto.randomInt(0, 1e6)).padStart(6, '0')}`;
     if (!db.prepare('SELECT 1 FROM shipments WHERE tracking = ?').get(t)) return t;
   }
 }

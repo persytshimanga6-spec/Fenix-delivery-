@@ -8,8 +8,9 @@ import { ensureBase, seedDemo } from './seed.js';
 import { authenticate, need, login, publicUser, hash, normPhone } from './auth.js';
 import { quote, fail, STATUS_LABELS, HttpError } from './logic.js';
 import { createShipment, mustGet, publicTrack, amountDue } from './shipments.js';
+import { MOBILE } from './logic.js';
 import { isEmail } from './notify.js';
-import { heatmap, traffic } from './pricing.js';
+import { heatmap } from './pricing.js';
 import driverRoutes from './routes/driver.js';
 import adminRoutes from './routes/admin.js';
 import agencyRoutes from './routes/agency.js';
@@ -42,15 +43,29 @@ api.get('/config', (_req, res) => res.json({
   company: setting('company_name', 'Fenix Delivery'),
   communes: db.prepare('SELECT name, secteur FROM communes ORDER BY name').all(),
   agencies: db.prepare('SELECT id, name, kind, commune, address, lat, lng FROM agencies WHERE active = 1 ORDER BY name').all(),
-  statuses: STATUS_LABELS
+  statuses: STATUS_LABELS,
+  // Numéros Mobile Money de l'entreprise, pour payer avant le départ du colis.
+  momo: Object.fromEntries(MOBILE.map((m) => [m, setting(`momo_${m}`, '')]))
 }));
 
 api.post('/quote', (req, res) => res.json(quote({
   ...req.body, cod_amount_fc: Number(req.body.cod_amount_fc) || 0, declared_value_fc: Number(req.body.declared_value_fc) || 0
 })));
 
-// Carte des zones occupées (livreurs, commerçants, agences, back office).
-api.get('/heatmap', need('livreur', 'admin', 'agent', 'commercant'), (_req, res) => res.json({ communes: heatmap(), traffic: traffic(), at: new Date().toISOString() }));
+// Carte « où sont les colis » (aide pour organiser les livreurs). Aucun effet sur le prix.
+api.get('/heatmap', need('admin', 'agent'), (_req, res) => res.json({ communes: heatmap(), at: new Date().toISOString() }));
+
+// Réservation en ligne par un client : le prix est payé avant le départ du colis.
+const bookings = new Map();
+api.post('/book', async (req, res) => {
+  const ip = req.ip || 'x', now = Date.now();
+  const recent = (bookings.get(ip) || []).filter((t) => now - t < 3600e3);
+  if (recent.length >= 10) fail(429, 'Trop de réservations depuis cette connexion. Réessayez dans une heure.');
+  bookings.set(ip, [...recent, now]);
+  const s = await createShipment(req.body, null, { public: true });
+  res.status(201).json({ tracking: s.tracking, otp: s.otp, price_fc: s.price_fc, quote: s.quote, pay_method: s.pay_method,
+    payment_status: s.payment_status, payment_ref: s.payment_ref, momo_number: setting(`momo_${s.pay_method}`, '') || null });
+});
 
 api.get('/track/:tracking', (req, res) => res.json(publicTrack(mustGet(req.params.tracking))));
 

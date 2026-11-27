@@ -3,7 +3,7 @@
 # - dossier /opt/fenix, projet docker « fenix », réseau et volume à part
 # - port public 8081 (ou FENIX_PORT=xxxx), jamais 80/443/3000/5432/6379
 # - aucune modification de nginx, des autres conteneurs ou de leurs fichiers
-set -euo pipefail
+set -eu  # pas de pipefail : « tr … | head -c » se termine normalement par SIGPIPE (141)
 PORT="${FENIX_PORT:-8081}"
 cd "$(dirname "$0")/.."
 APP_DIR=$(pwd)

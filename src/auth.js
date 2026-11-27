@@ -19,8 +19,16 @@ function secret() {
 export const normPhone = (p) => String(p || '').replace(/[^\d+]/g, '');
 
 export function login(phone, password) {
-  const u = db.prepare('SELECT * FROM users WHERE phone = ? AND active = 1').get(normPhone(phone));
+  const u = db.prepare('SELECT * FROM users WHERE phone = ?').get(normPhone(phone));
   if (!u || !bcrypt.compareSync(String(password || ''), u.password_hash)) fail(401, 'Téléphone ou mot de passe incorrect');
+  if (!u.active) {
+    // Candidature de livreur pas encore validée (ou refusée) : pas de connexion.
+    let st = null;
+    try { st = db.prepare('SELECT status FROM driver_profiles WHERE user_id = ?').get(u.id)?.status; } catch { /* table absente */ }
+    if (st === 'en_attente') fail(403, 'Votre candidature est en attente de validation par le bureau');
+    if (st === 'refuse') fail(403, 'Votre candidature n’a pas été retenue');
+    fail(401, 'Téléphone ou mot de passe incorrect');
+  }
   const token = jwt.sign({ id: u.id, role: u.role }, secret(), { expiresIn: '12h' });
   return { token, user: publicUser(u) };
 }

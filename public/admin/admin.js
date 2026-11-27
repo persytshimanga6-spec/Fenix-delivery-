@@ -100,22 +100,58 @@ const pages = {
 
   // ---------------- Équipe ----------------
   async equipe() {
-    const [users, agencies] = await Promise.all([api('/api/admin/users'), api('/api/admin/agencies')]);
+    const [users, agencies, apps] = await Promise.all([api('/api/admin/users'), api('/api/admin/agencies'), api('/api/admin/applications')]);
     const secteurs = [...new Set(cfg.communes.map((c) => c.secteur))];
+    const zoneSel = (name, extra = '') => `<select name="${name}" ${extra}><option value="">—</option>${secteurs.map((s) => `<option>${esc(s)}</option>`).join('')}</select>`;
+    const yn = (v) => (v ? 'Oui' : 'Non');
     view.innerHTML = `<div class="stack"><h1>Livreurs et équipe</h1>
-      <form id="add" class="card grid" style="align-items:end">
-        <label class="f">Rôle<select name="role"><option value="livreur">Livreur</option><option value="agent">Agent d'agence</option><option value="admin">Administrateur</option></select></label>
-        <label class="f">Nom<input name="name" required></label><label class="f">Téléphone<input name="phone" type="tel" required></label>
-        <label class="f">Mot de passe<input name="password" minlength="6" required></label>
-        <label class="f">Secteur (livreur)<select name="zone"><option value="">—</option>${secteurs.map((s) => `<option>${esc(s)}</option>`).join('')}</select></label>
-        <label class="f">Agence (agent)<select name="agency_id"><option value="">—</option>${agencies.map((a) => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select></label>
+      <div class="card scroll"><h2>Candidatures de livreurs en attente (${apps.length})</h2>
+        <p class="muted small" style="margin:0 0 8px">Reçues par « Devenir livreur — Postuler ». Un livreur ne peut se connecter qu'une fois validé.</p>
+        <table><thead><tr><th>Nom complet</th><th>Contact</th><th>Adresse</th><th>Naissance</th><th>Permis</th><th>Expérience</th><th>Handicap</th><th>Crime déclaré</th><th>Secteur</th><th></th></tr></thead><tbody>
+        ${apps.map((p) => `<tr><td><strong>${esc(p.full_name)}</strong><div class="tiny muted">Nom ${esc(p.last_name)} · Post-nom ${esc(p.post_name)} · Prénom ${esc(p.first_name)}</div><div class="tiny muted">${when(p.created_at)}</div></td>
+          <td>${esc(p.phone)}<div class="tiny muted">${esc(p.email)}</div></td><td class="small">${esc(p.address)}</td>
+          <td>${p.birth_year}<div class="tiny muted">${new Date().getFullYear() - p.birth_year} ans</div></td><td>${esc(p.license_no)}</td>
+          <td>${p.experience_years >= 5 ? '5 ans ou plus' : `${p.experience_years} ans`}</td>
+          <td>${yn(p.disability)}${p.disability_note ? `<div class="tiny muted">${esc(p.disability_note)}</div>` : ''}</td><td>${yn(p.criminal_record)}</td>
+          <td>${zoneSel('zone', `data-zone-for="${p.user_id}"`)}</td>
+          <td class="row" style="gap:6px"><button class="primary" data-decide="${p.user_id}" data-d="valide">Valider</button><button data-decide="${p.user_id}" data-d="refuse">Refuser</button></td></tr>`).join('')
+          || '<tr><td colspan="10" class="muted">Aucune candidature en attente.</td></tr>'}
+        </tbody></table></div>
+
+      <form id="add" class="card stack">
+        <h2 style="margin:0">Ajouter un membre</h2>
+        <div class="grid" style="align-items:end">
+          <label class="f">Rôle<select name="role" id="addRole"><option value="livreur">Livreur</option><option value="agent">Agent d'agence</option><option value="admin">Administrateur</option></select></label>
+          <label class="f">Téléphone<input name="phone" type="tel" required></label>
+          <label class="f">Mot de passe<input name="password" minlength="6" required></label>
+          <label class="f staff">Nom<input name="name"></label>
+          <label class="f staff">Agence (agent)<select name="agency_id"><option value="">—</option>${agencies.map((a) => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select></label>
+        </div>
+        <div class="grid driver" style="align-items:end">
+          <label class="f">Nom<input name="last_name"></label><label class="f">Post-nom<input name="post_name"></label><label class="f">Prénom<input name="first_name"></label>
+          <label class="f">Adresse<input name="address"></label><label class="f">Année de naissance<input name="birth_year" type="number" min="1930"></label>
+          <label class="f">E-mail<input name="email" type="email"></label><label class="f">Numéro du permis<input name="license_no"></label>
+          <label class="f">Années d'expérience<select name="experience_years"><option value="">—</option><option value="2">2 ans</option><option value="3">3 ans</option><option value="4">4 ans</option><option value="5">5 ans ou plus</option></select></label>
+          <label class="f">Handicap<select name="disability"><option value="">—</option><option value="non">Non</option><option value="oui">Oui</option></select></label>
+          <label class="f">Précision (si handicap)<input name="disability_note"></label>
+          <label class="f">Crime déclaré<select name="criminal_record"><option value="">—</option><option value="non">Non</option><option value="oui">Oui</option></select></label>
+          <label class="f">Secteur${zoneSel('zone')}</label>
+        </div>
         <button class="primary">Ajouter</button>
       </form>
-      <div class="card scroll"><table><thead><tr><th>Nom</th><th>Rôle</th><th>Téléphone</th><th>Secteur / agence</th><th>État</th><th></th></tr></thead><tbody>
+
+      <div class="card scroll"><table><thead><tr><th>Nom</th><th>Rôle</th><th>Téléphone</th><th>Secteur / agence</th><th>Permis</th><th>Expérience</th><th>État</th><th></th></tr></thead><tbody>
       ${users.map((u) => `<tr><td>${esc(u.name)}</td><td>${esc(u.role)}</td><td>${esc(u.phone)}</td><td>${esc(u.zone || u.agency_name || '—')}</td>
-        <td>${u.active ? badge('actif', 'Actif') : badge('suspendu', 'Désactivé')}</td>
-        <td class="row" style="gap:6px"><button data-toggle="${u.id}" data-active="${u.active}">${u.active ? 'Désactiver' : 'Réactiver'}</button><button data-pass="${u.id}">Nouveau mot de passe</button></td></tr>`).join('')}
+        <td>${esc(u.license_no || '—')}</td><td>${u.experience_years == null ? '—' : u.experience_years >= 5 ? '5 ans ou plus' : `${u.experience_years} ans`}</td>
+        <td>${u.application_status === 'refuse' ? badge('suspendu', 'Refusé') : u.active ? badge('actif', 'Actif') : badge('suspendu', 'Désactivé')}</td>
+        <td class="row" style="gap:6px">${u.application_status === 'refuse' ? '' : `<button data-toggle="${u.id}" data-active="${u.active}">${u.active ? 'Désactiver' : 'Réactiver'}</button>`}<button data-pass="${u.id}">Nouveau mot de passe</button></td></tr>`).join('')}
       </tbody></table></div></div>`;
+    const role = () => $('#addRole').value;
+    const sync = () => {
+      $$('#add .driver').forEach((x) => x.classList.toggle('hidden', role() !== 'livreur'));
+      $$('#add .staff').forEach((x) => x.classList.toggle('hidden', role() === 'livreur'));
+    };
+    $('#addRole').onchange = sync; sync();
     $('#add').onsubmit = run(async (e) => {
       e.preventDefault();
       const f = Object.fromEntries(new FormData(e.target));
@@ -123,6 +159,13 @@ const pages = {
       toast('Compte créé'); pages.equipe();
     });
     view.onclick = run(async (e) => {
+      const d = e.target.closest('[data-decide]');
+      if (d) {
+        if (d.dataset.d === 'refuse' && !confirm('Refuser cette candidature ?')) return;
+        const zone = $(`[data-zone-for="${d.dataset.decide}"]`)?.value || null;
+        await api(`/api/admin/applications/${d.dataset.decide}`, { method: 'POST', body: { decision: d.dataset.d, zone } });
+        toast(d.dataset.d === 'valide' ? 'Livreur validé : il peut se connecter' : 'Candidature refusée'); return pages.equipe();
+      }
       const t = e.target.closest('[data-toggle]');
       if (t) { await api(`/api/admin/users/${t.dataset.toggle}`, { method: 'PATCH', body: { active: t.dataset.active !== '1' } }); return pages.equipe(); }
       const p = e.target.closest('[data-pass]');

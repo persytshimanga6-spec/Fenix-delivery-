@@ -5,6 +5,7 @@ import { fail, STATUS_LABELS, today, newOtp } from '../logic.js';
 import { notifyNewCode, notifyMerchant } from '../notify.js';
 import { hash, normPhone } from '../auth.js';
 import { createShipment, mustGet, move, depotScan, amountDue, confirmPayment } from '../shipments.js';
+import { createDriver, decide } from '../drivers.js';
 
 const r = express.Router();
 const int = (v) => Math.round(Number(v) || 0);
@@ -92,11 +93,23 @@ r.post('/shipments/:t/resend-code', async (req, res) => {
 r.post('/depot/scan', (req, res) => res.json(depotScan(mustGet(req.body.tracking), req.user)));
 
 // ----- Personnes -----
-r.get('/users', (_req, res) => res.json(db.prepare(`SELECT u.id, u.role, u.name, u.phone, u.zone, u.active, u.agency_id, a.name agency_name, u.created_at
-  FROM users u LEFT JOIN agencies a ON a.id = u.agency_id WHERE u.role != 'commercant' ORDER BY u.role, u.name`).all()));
+r.get('/users', (_req, res) => res.json(db.prepare(`SELECT u.id, u.role, u.name, u.phone, u.zone, u.active, u.agency_id, a.name agency_name, u.created_at,
+  p.license_no, p.experience_years, p.status application_status
+  FROM users u LEFT JOIN agencies a ON a.id = u.agency_id LEFT JOIN driver_profiles p ON p.user_id = u.id
+  WHERE u.role != 'commercant' AND COALESCE(p.status, 'valide') != 'en_attente' ORDER BY u.role, u.name`).all()));
+
+// Candidatures de livreurs (formulaire « Postuler »).
+r.get('/applications', (req, res) => {
+  const st = ['en_attente', 'valide', 'refuse'].includes(req.query.status) ? req.query.status : 'en_attente';
+  res.json(db.prepare(`SELECT p.*, u.name full_name, u.phone FROM driver_profiles p JOIN users u ON u.id = p.user_id
+    WHERE p.status = ? ORDER BY p.created_at`).all(st));
+});
+r.post('/applications/:id', (req, res) => res.json(decide(Number(req.params.id), req.body.decision, req.user.id, req.body.zone)));
 r.post('/users', (req, res) => {
   const { role, name, phone, password, agency_id, zone } = req.body;
   if (!['livreur', 'agent', 'admin'].includes(role)) fail(400, 'Rôle invalide');
+  // Livreur ajouté par le bureau : mêmes champs que la candidature, validé tout de suite.
+  if (role === 'livreur') return res.status(201).json({ id: createDriver(req.body, { validated: true, by: req.user.id, zone }) });
   if (!name || !phone || !password || String(password).length < 6) fail(400, 'Nom, téléphone et mot de passe (6 caractères) obligatoires');
   if (role === 'agent' && !agency_id) fail(400, 'Choisissez l’agence de l’agent');
   if (db.prepare('SELECT 1 FROM users WHERE phone = ?').get(normPhone(phone))) fail(409, 'Ce numéro a déjà un compte');
@@ -107,6 +120,7 @@ r.post('/users', (req, res) => {
 r.patch('/users/:id', (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id) || fail(404, 'Introuvable');
   if (u.id === req.user.id && req.body.active === false) fail(400, 'Vous ne pouvez pas désactiver votre propre compte');
+  if (req.body.active && db.prepare("SELECT 1 FROM driver_profiles WHERE user_id = ? AND status != 'valide'").get(u.id)) fail(409, 'Validez d’abord la candidature de ce livreur');
   if ('active' in req.body) db.prepare('UPDATE users SET active = ? WHERE id = ?').run(req.body.active ? 1 : 0, u.id);
   if (req.body.password) db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash(req.body.password), u.id);
   if ('zone' in req.body) db.prepare('UPDATE users SET zone = ? WHERE id = ?').run(req.body.zone || null, u.id);

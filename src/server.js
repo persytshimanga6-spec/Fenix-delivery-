@@ -10,7 +10,7 @@ import { quote, fail, STATUS_LABELS, HttpError } from './logic.js';
 import { createShipment, mustGet, publicTrack, amountDue } from './shipments.js';
 import { MOBILE } from './logic.js';
 import { isEmail } from './notify.js';
-import { heatmap } from './pricing.js';
+import { heatmap, clientQuote } from './pricing.js';
 import driverRoutes from './routes/driver.js';
 import adminRoutes from './routes/admin.js';
 import agencyRoutes from './routes/agency.js';
@@ -48,9 +48,12 @@ api.get('/config', (_req, res) => res.json({
   momo: Object.fromEntries(MOBILE.map((m) => [m, setting(`momo_${m}`, '')]))
 }));
 
-api.post('/quote', (req, res) => res.json(quote({
-  ...req.body, cod_amount_fc: Number(req.body.cod_amount_fc) || 0, declared_value_fc: Number(req.body.declared_value_fc) || 0
-})));
+// Devis. Le client voit « Distance » (carburant + trafic regroupés) ; le personnel peut demander le détail (?detail=1).
+api.post('/quote', (req, res) => {
+  const q = quote({ ...req.body, cod_amount_fc: Number(req.body.cod_amount_fc) || 0, declared_value_fc: Number(req.body.declared_value_fc) || 0 });
+  const staff = ['admin', 'agent'].includes(req.user?.role) && req.query.detail === '1';
+  res.json(staff ? q : clientQuote(q));
+});
 
 // Carte « où sont les colis » (aide pour organiser les livreurs). Aucun effet sur le prix.
 api.get('/heatmap', need('admin', 'agent'), (_req, res) => res.json({ communes: heatmap(), at: new Date().toISOString() }));
@@ -63,7 +66,7 @@ api.post('/book', async (req, res) => {
   if (recent.length >= 10) fail(429, 'Trop de réservations depuis cette connexion. Réessayez dans une heure.');
   bookings.set(ip, [...recent, now]);
   const s = await createShipment(req.body, null, { public: true });
-  res.status(201).json({ tracking: s.tracking, otp: s.otp, price_fc: s.price_fc, quote: s.quote, pay_method: s.pay_method,
+  res.status(201).json({ tracking: s.tracking, otp: s.otp, price_fc: s.price_fc, quote: clientQuote(s.quote), pay_method: s.pay_method,
     payment_status: s.payment_status, payment_ref: s.payment_ref, momo_number: setting(`momo_${s.pay_method}`, '') || null });
 });
 
@@ -146,7 +149,10 @@ merchant.get('/shipments', (req, res) => {
     FROM shipments WHERE merchant_id = ? ORDER BY id DESC LIMIT 500`).all(req.user.merchant_id);
   res.json(rows.map((r) => ({ ...r, label: STATUS_LABELS[r.status] })));
 });
-merchant.post('/shipments', async (req, res) => res.status(201).json(await createShipment(req.body, req.user)));
+merchant.post('/shipments', async (req, res) => {
+  const s = await createShipment(req.body, req.user);
+  res.status(201).json({ ...s, quote: clientQuote(s.quote) });
+});
 merchant.get('/summary', (req, res) => {
   const id = req.user.merchant_id;
   res.json({

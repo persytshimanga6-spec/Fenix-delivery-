@@ -59,10 +59,10 @@ export function deliveryPrice(d) {
   return {
     distance_km: dist, minutes, rush,
     lines: [
-      { label: `Prise en charge · ${d.size}`, fc: base },
-      { label: `Distance : ${dist.toLocaleString('fr-FR')} km`, fc: null },
-      { label: `Carburant (${liters.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} L)`, fc: fuel },
-      { label: `Trafic : environ ${minutes} min${rush ? ' (heure de pointe)' : ''}`, fc: time }
+      { label: `Prise en charge · ${d.size}`, fc: base, key: 'base' },
+      { label: `Distance : ${dist.toLocaleString('fr-FR')} km`, fc: null, key: 'distance' },
+      { label: `Carburant (${liters.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} L)`, fc: fuel, key: 'fuel' },
+      { label: `Trafic : environ ${minutes} min${rush ? ' (heure de pointe)' : ''}`, fc: time, key: 'time' }
     ]
   };
 }
@@ -89,4 +89,18 @@ export function heatmap() {
     const score = n / Math.max(1, dr);
     return { name: c.name, secteur: c.secteur, lat: c.lat, lng: c.lng, demand: n, drivers: dr, level: score >= 6 ? 2 : score >= 3 ? 1 : 0 };
   });
+}
+
+/**
+ * Devis montré au client : le carburant et le trafic restent dans le calcul, mais ils sont regroupés
+ * dans la ligne « Distance » (ce n'est pas la faute du client s'il y a des embouteillages).
+ * Les lignes visibles s'additionnent toujours pour donner le total. Le détail complet reste pour le personnel.
+ */
+export function clientQuote(q) {
+  const hidden = q.lines.filter((l) => l.key === 'fuel' || l.key === 'time').reduce((t, l) => t + (l.fc || 0), 0);
+  const lines = q.lines.filter((l) => l.key !== 'fuel' && l.key !== 'time')
+    .map((l) => (l.key === 'distance' ? { ...l, fc: hidden } : l))
+    .map(({ key, ...l }) => l);
+  const { minutes, rush, ...rest } = q;
+  return { ...rest, lines };
 }

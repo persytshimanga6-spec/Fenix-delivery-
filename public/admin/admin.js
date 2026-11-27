@@ -321,7 +321,7 @@ const pages = {
     fillCommunes($('#tFrom'), t.communes); fillCommunes($('#tTo'), t.communes);
     $('#tFrom').value = 'Gombe'; $('#tTo').value = 'Limete';
     $('#tGo').onclick = run(async () => {
-      const q = await api('/api/quote', { method: 'POST', body: { from_commune: $('#tFrom').value, to_commune: $('#tTo').value, size: $('#tSize').value } });
+      const q = await api('/api/quote?detail=1', { method: 'POST', body: { from_commune: $('#tFrom').value, to_commune: $('#tTo').value, size: $('#tSize').value } });
       $('#tOut').innerHTML = quoteLines(q) + `<div class="spread"><strong>Total</strong><strong>${fc(q.price_fc)}</strong></div>`;
     });
   },

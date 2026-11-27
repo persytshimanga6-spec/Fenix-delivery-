@@ -57,7 +57,7 @@ $('#pickupAgency').innerHTML = cfg.agencies.map((a) => `<option value="${a.id}" 
 const quote = run(async () => {
   const f = new FormData(form);
   if (!f.get('to_commune')) return;
-  const r = await api('/api/quote', { method: 'POST', body: { from_commune: info.agency.commune, from_lat: info.agency.lat, from_lng: info.agency.lng, to_commune: f.get('to_commune'), size: ship.size,
+  const r = await api('/api/quote?detail=1', { method: 'POST', body: { from_commune: info.agency.commune, from_lat: info.agency.lat, from_lng: info.agency.lng, to_commune: f.get('to_commune'), size: ship.size,
     ...(ship.mode === 'domicile' ? { to_lat: ship.to_lat, to_lng: ship.to_lng } : { pickup_agency_id: f.get('pickup_agency_id') }),
     express: !!f.get('express'), insured: !!f.get('insured'), declared_value_fc: f.get('declared_value_fc') } });
   $('#quoteLines').innerHTML = quoteLines(r);

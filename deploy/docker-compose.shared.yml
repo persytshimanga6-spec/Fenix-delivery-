@@ -1,0 +1,20 @@
+# Fenix Delivery sur un serveur partagé (ex. avec ProMarket).
+# Projet, conteneur, réseau et volume à part. Un seul port public : 8081 (modifiable avec FENIX_PORT).
+# Ne touche à aucun autre conteneur.
+name: fenix
+services:
+  fenix-delivery:
+    build: ..
+    container_name: fenix-delivery
+    restart: unless-stopped
+    env_file: ../.env
+    ports:
+      - "${FENIX_PORT:-8081}:3000"
+    volumes:
+      - fenix-data:/data
+    mem_limit: 300m
+    networks: [fenix-net]
+networks:
+  fenix-net: {}
+volumes:
+  fenix-data: {}

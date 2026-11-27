@@ -13,7 +13,11 @@ const config = {
     cleartext: http,
     errorPath: 'offline.html'
   },
-  android: { allowMixedContent: http }
+  android: { allowMixedContent: http },
+  plugins: {
+    // Barre de statut : Capacitor donne la hauteur à la page (--safe-area-inset-top), utilisée par l'en-tête.
+    SystemBars: { insetsHandling: 'css', initialViewportFitValueHint: 'cover' }
+  }
 };
 writeFileSync(new URL('../capacitor.config.json', import.meta.url), JSON.stringify(config, null, 2) + '\n');
 // La page « Pas de connexion » sait où réessayer.

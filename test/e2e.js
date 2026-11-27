@@ -73,8 +73,8 @@ try {
   let s1;
   let q1;
   await step('devis par trajet : prise en charge + carburant + temps', async () => {
-    q1 = await pub.ok('POST', '/api/quote', { from_commune: 'Kalamu', to_commune: 'Limete', size: 'moyen', cod_amount_fc: 50000,
-      from_lat: -4.33, from_lng: 15.31, to_lat: -4.36, to_lng: 15.34 });
+    const trip = { from_commune: 'Kalamu', to_commune: 'Limete', size: 'moyen', cod_amount_fc: 50000, from_lat: -4.33, from_lng: 15.31, to_lat: -4.36, to_lng: 15.34 };
+    q1 = await admin.ok('POST', '/api/quote?detail=1', trip); // détail complet : personnel seulement
     assert.equal(q1.zone, 3); // Funa → Mont-Amba (sert au tri)
     const km = q1.distance_km, min = Math.max(1, Math.round(km / 30 * 60));
     const up = (x) => Math.ceil(x / 100) * 100;
@@ -82,6 +82,15 @@ try {
     assert.equal(q1.price_fc, 4000 + up(km * 0.03 * 2640) + up(min * 100) + 1000); // + 2 % de 50 000
     assert.ok(q1.lines.some((l) => l.label.startsWith('Carburant')) && q1.lines.some((l) => l.label.startsWith('Trafic')));
     assert.ok(!JSON.stringify(q1).includes('%'), 'aucun supplément en %');
+    // Le client ne voit ni carburant ni trafic : regroupés dans « Distance », les lignes s'additionnent.
+    const c = await pub.ok('POST', '/api/quote?detail=1', trip);
+    assert.equal(c.price_fc, q1.price_fc);
+    assert.ok(!c.lines.some((l) => /Carburant|Trafic|min/.test(l.label)) && c.minutes === undefined);
+    const dist = c.lines.find((l) => l.label.startsWith('Distance'));
+    assert.equal(dist.fc, q1.lines.filter((l) => /^(Carburant|Trafic)/.test(l.label)).reduce((t, l) => t + l.fc, 0));
+    assert.equal(c.lines.reduce((t, l) => t + (l.fc || 0), 0), c.price_fc);
+    const m = await merch.ok('POST', '/api/quote', trip);
+    assert.ok(!m.lines.some((l) => /Carburant|Trafic/.test(l.label)));
   });
   await step('le commerçant crée un envoi payé par M-Pesa (marchandise encaissée à la livraison)', async () => {
     assert.equal((await merch.call('POST', '/api/merchant/shipments', { ...order, payment_ref: '' })).status, 400);
@@ -232,6 +241,7 @@ try {
     assert.equal((await pub.call('POST', '/api/book', { ...book, pay_method: 'orange' })).status, 400); // référence obligatoire
     pubMomo = await pub.ok('POST', '/api/book', { ...book, pay_method: 'orange', payment_ref: 'OM-55443322' });
     assert.match(pubMomo.tracking, /^FX-/); assert.match(pubMomo.otp, /^\d{4}$/);
+    assert.ok(!pubMomo.quote.lines.some((l) => /Carburant|Trafic/.test(l.label)));
     assert.equal(pubMomo.payment_status, 'en_attente');
     assert.equal((await admin.call('POST', `/api/admin/shipments/${pubMomo.tracking}/assign`, { driver_id: gm.id })).status, 402);
     await agent.ok('POST', `/api/agency/shipments/${pubMomo.tracking}/confirm-payment`, { method: 'orange' });
@@ -288,7 +298,7 @@ try {
   await step('réglages du calcul appliqués au devis, heure de pointe = trajet plus long', async () => {
     await admin.ok('PUT', '/api/admin/rates', { settings: { express_supplement_fc: 6000, fuel_price_fc: 3000, minute_fc: 150 } });
     const pts = { from_commune: 'Gombe', to_commune: 'Gombe', size: 'petit', from_lat: -4.305, from_lng: 15.305, to_lat: -4.33, to_lng: 15.33 };
-    const q = await pub.ok('POST', '/api/quote', { ...pts, express: true });
+    const q = await admin.ok('POST', '/api/quote?detail=1', { ...pts, express: true });
     const up = (x) => Math.ceil(x / 100) * 100, min = Math.round(q.distance_km / 30 * 60);
     assert.equal(q.price_fc, 3000 + up(q.distance_km * 0.03 * 3000) + up(min * 150) + 6000);
     const far = await pub.ok('POST', '/api/quote', { from_commune: 'Gombe', to_commune: 'Nsele', size: 'petit' });
@@ -296,7 +306,10 @@ try {
     const grand = await pub.ok('POST', '/api/quote', { from_commune: 'Gombe', to_commune: 'Nsele', size: 'grand' });
     assert.equal(grand.price_fc - far.price_fc, 3000); // seule la prise en charge change
     await admin.ok('PUT', '/api/admin/rates', { settings: { rush_hours: '0-24' } });
-    const rush = await pub.ok('POST', '/api/quote', { from_commune: 'Gombe', to_commune: 'Nsele', size: 'petit' });
+    const rush = await admin.ok('POST', '/api/quote?detail=1', { from_commune: 'Gombe', to_commune: 'Nsele', size: 'petit' });
+    const rushClient = await pub.ok('POST', '/api/quote', { from_commune: 'Gombe', to_commune: 'Nsele', size: 'petit' });
+    assert.equal(rushClient.price_fc, rush.price_fc);
+    assert.ok(!JSON.stringify(rushClient).includes('pointe') && !JSON.stringify(rushClient).includes('min'));
     const sunday = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Kinshasa', weekday: 'short' }).format(new Date()) === 'Sun';
     if (!sunday) {
       assert.equal(rush.minutes, Math.round(rush.distance_km / 18 * 60));

@@ -19,7 +19,8 @@ jobs:
   apk:
     runs-on: ubuntu-latest
     env:
-      FENIX_SERVER: ${{ inputs.server || vars.FENIX_SERVER || 'https://fenix.promarketmalchena.com' }}
+      INPUT_SERVER: ${{ inputs.server }}
+      VAR_SERVER: ${{ vars.FENIX_SERVER }}
       HAS_KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
@@ -30,6 +31,18 @@ jobs:
       - name: Installer Capacitor
         working-directory: mobile
         run: npm ci
+      - name: Choisir l'adresse du serveur (HTTPS obligatoire)
+        run: |
+          DEFAULT=https://fenix.promarketmalchena.com
+          if [ -n "$INPUT_SERVER" ]; then SERVER="$INPUT_SERVER"
+          elif [ -n "$VAR_SERVER" ]; then
+            case "$VAR_SERVER" in
+              https://*) SERVER="$VAR_SERVER" ;;
+              *) echo "::warning::La variable FENIX_SERVER ($VAR_SERVER) n'est pas en HTTPS : elle est ignorée. Supprimez-la ou mettez une adresse https://."; SERVER="$DEFAULT" ;;
+            esac
+          else SERVER="$DEFAULT"; fi
+          echo "FENIX_SERVER=$SERVER" >> "$GITHUB_ENV"
+          echo "Serveur : $SERVER"
       - name: Régler l'adresse du serveur et synchroniser
         working-directory: mobile
         run: npm run sync
@@ -59,7 +72,7 @@ jobs:
           tag_name: livreur-1.0.${{ github.run_number }}
           name: Fenix Livreur 1.0.${{ github.run_number }}
           body: |
-            Appli Android « Fenix Livreur ». Serveur : ${{ env.FENIX_SERVER }}
+            Appli Android « Fenix Livreur ». Serveur : ${{ env.FENIX_SERVER }} (HTTPS), signée avec la clé des secrets GitHub.
             Installer : ouvrir fenix-livreur.apk sur le téléphone Android, autoriser l'installation, puis ouvrir Fenix Livreur.
           files: ${{ runner.temp }}/fenix-livreur.apk
           make_latest: true

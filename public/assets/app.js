@@ -53,7 +53,7 @@ export function fillCommunes(select, communes, placeholder = 'Choisir la commune
 export const KIN = [-4.325, 15.322];
 export function mapPicker(el, onPick, start) {
   const map = L.map(el).setView(start || KIN, start ? 16 : 12);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+  addTiles(map);
   let marker = null;
   const set = (lat, lng, zoom) => {
     if (!marker) {
@@ -103,7 +103,7 @@ export const loginHtml = (title) => `<div id="login" class="narrow hidden"><div 
 export const HEAT = ['rgba(168,154,136,.18)', '#A87BEA', '#7B2FD0'];
 export function heatMap(el, { refresh = 60000, onData } = {}) {
   const map = L.map(el, { zoomControl: true }).setView([-4.36, 15.33], 11);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+  addTiles(map);
   const layer = L.layerGroup().addTo(map);
   const load = async () => {
     const d = await api('/api/heatmap');
@@ -133,4 +133,19 @@ export function quoteLines(q) {
   return q.lines.map((l) => l.fc == null
     ? `<div class="spread small muted"><span>${esc(l.label)}</span><span></span></div>`
     : `<div class="spread"><span>${esc(l.label)}</span><span>${fc(l.fc)}</span></div>`).join('');
+}
+
+// ---------- Fond de carte ----------
+// Tuiles CARTO (Positron, rendu clair) : les serveurs bénévoles d'OpenStreetMap refusent les applis (erreur 403).
+// La clé gratuite CARTO se règle dans Back office › Tarifs et réglages (gratuit jusqu'à 1 million de tuiles par mois).
+let tileCfg;
+export function addTiles(map) {
+  tileCfg ??= api('/api/config').then((c) => c.map).catch(() => null);
+  tileCfg.then((m) => {
+    const key = m?.carto_key;
+    const url = key
+      ? `https://basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}{r}.png?key=${encodeURIComponent(key)}`
+      : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+    L.tileLayer(url, { maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>' }).addTo(map);
+  });
 }

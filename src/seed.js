@@ -42,7 +42,8 @@ const SETTINGS = {
   rush_hours: '6-9,16-19',    // heures de pointe (sauf dimanche)
   road_factor: '1.35',        // détour moyen par la route
   // Numéros Mobile Money de l'entreprise, affichés au client pour payer.
-  momo_mpesa: '', momo_orange: '', momo_airtel: ''
+  momo_mpesa: '', momo_orange: '', momo_airtel: '',
+  carto_api_key: ''          // clé gratuite du fond de carte CARTO (Tarifs et réglages)
 };
 
 export function ensureBase() {

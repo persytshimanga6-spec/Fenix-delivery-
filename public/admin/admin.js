@@ -1,4 +1,4 @@
-import { $, $$, api, esc, fc, when, toast, run, badge, requireLogin, logout, PAY, PAY_STATE, KIN, fillCommunes, heatMap, heatLegend, quoteLines } from '/assets/app.js';
+import { $, $$, api, esc, fc, when, toast, run, badge, requireLogin, logout, PAY, PAY_STATE, KIN, fillCommunes, heatMap, heatLegend, quoteLines, addTiles } from '/assets/app.js';
 
 const cfg = await api('/api/config');
 $$('[data-company]').forEach((e) => (e.textContent = cfg.company));
@@ -37,7 +37,7 @@ const pages = {
         <div class="card stack"><div class="spread"><h2>Où sont les colis</h2><span class="small muted">Pour envoyer les livreurs au bon endroit</span></div>
           <div class="grid2" style="align-items:start"><div id="heat" class="map tall"></div><div id="heatInfo" class="stack"></div></div></div></div>`;
     const map = L.map('map').setView(KIN, 12);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+    addTiles(map);
     d.drivers.filter((x) => x.last_lat).forEach((x) => L.circleMarker([x.last_lat, x.last_lng], { radius: 9, color: '#110B06', fillOpacity: 1 }).addTo(map).bindTooltip(x.name));
     if (window.__heat) window.__heat.stop();
     window.__heat = heatMap($('#heat'), { onData: (h) => {
@@ -353,6 +353,9 @@ const pages = {
           <select id="tSize"><option>petit</option><option>moyen</option><option>grand</option></select><button type="button" id="tGo">Calculer</button></div>
           <div id="tOut" class="small" style="margin-top:8px"></div><p class="tiny muted" style="margin:6px 0 0">Enregistrez d'abord pour essayer les nouveaux réglages.</p></div>
       </div>
+      <div class="card stack"><h2>Carte</h2>
+        <p class="muted small" style="margin:0">Fond de carte CARTO. Demandez une clé gratuite sur carto.com/basemaps/apikey (usage commercial gratuit jusqu'à 1 million de tuiles par mois), puis collez-la ici.</p>
+        <div class="grid">${field('carto_api_key', 'Clé CARTO (fond de carte)', 'type="text" autocomplete="off"')}</div></div>
       <div class="card stack"><h2>Numéros Mobile Money de l'entreprise</h2>
         <p class="muted small" style="margin:0">Affichés aux clients pour payer avant le départ du colis.</p>
         <div class="grid">

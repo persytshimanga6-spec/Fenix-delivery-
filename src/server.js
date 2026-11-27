@@ -46,7 +46,9 @@ api.get('/config', (_req, res) => res.json({
   agencies: db.prepare('SELECT id, name, kind, commune, address, lat, lng FROM agencies WHERE active = 1 ORDER BY name').all(),
   statuses: STATUS_LABELS,
   // Numéros Mobile Money de l'entreprise, pour payer avant le départ du colis.
-  momo: Object.fromEntries(MOBILE.map((m) => [m, setting(`momo_${m}`, '')]))
+  momo: Object.fromEntries(MOBILE.map((m) => [m, setting(`momo_${m}`, '')])),
+  // Clé publique du fond de carte (visible dans les adresses des tuiles, comme toute clé de carte).
+  map: { carto_key: setting('carto_api_key', '') || process.env.CARTO_API_KEY || '' }
 }));
 
 // Devis. Le client voit « Distance » (carburant + trafic regroupés) ; le personnel peut demander le détail (?detail=1).

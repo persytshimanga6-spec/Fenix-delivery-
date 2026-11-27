@@ -165,7 +165,7 @@ r.put('/rates', (req, res) => {
     }
     const allowed = ['company_name', 'express_supplement_fc', 'retry_fee_fc', 'insurance_pct', 'driver_share_salarie_pct', 'driver_share_independant_pct', 'relay_commission_pct',
       'base_petit_fc', 'base_moyen_fc', 'base_grand_fc', 'fuel_price_fc', 'fuel_l_per_km', 'minute_fc', 'speed_normal_kmh', 'speed_rush_kmh',
-      'rush_hours', 'road_factor', 'momo_mpesa', 'momo_orange', 'momo_airtel'];
+      'rush_hours', 'road_factor', 'momo_mpesa', 'momo_orange', 'momo_airtel', 'carto_api_key'];
     for (const [k, v] of Object.entries(req.body.settings || {})) {
       if (allowed.includes(k)) db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(k, String(v));
     }

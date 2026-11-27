@@ -19,7 +19,7 @@
 </main>
 <script src="/vendor/leaflet/leaflet.js"></script>
 <script type="module">
-import { $, api, esc, fc, when } from '/assets/app.js';
+import { $, api, esc, fc, when, addTiles } from '/assets/app.js';
 const cfg = await api('/api/config');
 document.querySelectorAll('[data-company]').forEach((e) => (e.textContent = cfg.company));
 const params = new URLSearchParams(location.search);
@@ -43,7 +43,7 @@ async function show(n) {
     <div class="card"><ol class="timeline">${t.events.map((e, i) => `<li class="${i === last ? 'now' : ''}"><div><strong>${esc(e.label)}</strong><div class="small muted">${when(e.at)}</div></div></li>`).join('')}</ol></div>`;
     if (t.driver?.lat) {
       map = L.map('map').setView([t.driver.lat, t.driver.lng], 14);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+      addTiles(map);
       L.circleMarker([t.driver.lat, t.driver.lng], { radius: 9, color: '#110B06', fillOpacity: 1 }).addTo(map).bindTooltip('Livreur');
       if (t.to_lat) L.marker([t.to_lat, t.to_lng]).addTo(map).bindTooltip('Vous');
     }

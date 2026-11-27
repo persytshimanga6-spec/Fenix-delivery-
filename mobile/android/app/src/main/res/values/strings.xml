@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Fenix Livreur</string>
+    <string name="title_activity_main">Fenix Livreur</string>
+    <string name="package_name">com.fenixdelivery.livreur</string>
+    <string name="custom_url_scheme">com.fenixdelivery.livreur</string>
+</resources>

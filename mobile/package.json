@@ -1,0 +1,20 @@
+{
+  "name": "fenix-livreur",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Appli mobile Fenix Livreur : l'appli livreur du site Fenix Delivery, dans une vraie appli Android (Capacitor).",
+  "type": "module",
+  "scripts": {
+    "config": "node scripts/config.mjs",
+    "sync": "node scripts/config.mjs && cap sync android"
+  },
+  "dependencies": {
+    "@capacitor-mlkit/barcode-scanning": "^8.2.2",
+    "@capacitor/android": "^8.6.3",
+    "@capacitor/core": "^8.6.3",
+    "@capacitor/geolocation": "^8.2.5"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.3"
+  }
+}

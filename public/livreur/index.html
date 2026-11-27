@@ -87,7 +87,7 @@ header.d{padding:14px 16px;display:flex;justify-content:space-between;align-item
   <div id="dInfo" class="small muted"></div>
   <label class="f" style="color:#E5D6C2">Code donné par le client<input name="otp" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required style="font-size:24px;letter-spacing:.3em"></label>
   <div id="dPayBox" class="stack"><div class="label">Le client a payé avec</div><div class="pills" id="dPay"></div></div>
-  <label class="f" style="color:#E5D6C2">Photo du colis remis<input name="photo" type="file" accept="image/*" capture="environment"></label>
+  <label class="f" style="color:#E5D6C2">Photo du colis remis (obligatoire)<input name="photo" type="file" accept="image/*" capture="environment" required></label>
   <div class="row"><button type="button" id="dCancel">Annuler</button><button class="primary" type="submit" style="flex:1">Confirmer la livraison</button></div>
 </form></dialog>
 
@@ -103,7 +103,10 @@ header.d{padding:14px 16px;display:flex;justify-content:space-between;align-item
 import { $, $$, api, esc, fc, toast, run, pills, requireLogin, logout, PAY } from '/assets/app.js';
 const cfg = await api('/api/config');
 $$('[data-company]').forEach((e) => (e.textContent = cfg.company));
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/livreur/sw.js').catch(() => {});
+// Dans l'appli mobile « Fenix Livreur » (Capacitor), on utilise le GPS et le scanner du téléphone.
+const NATIVE = !!window.Capacitor?.isNativePlatform?.();
+const Native = window.Capacitor?.Plugins || {};
+if (!NATIVE && 'serviceWorker' in navigator) navigator.serviceWorker.register('/livreur/sw.js').catch(() => {});
 
 let items = [], pos = { lat: null, lng: null }, current = null, payMethod = 'cash', reason = '';
 
@@ -139,9 +142,16 @@ addEventListener('online', () => { netState(); flush(); });
 addEventListener('offline', netState);
 
 // ---------- Position GPS (partagée tant que l'appli est ouverte : sert au suivi et à l'organisation des livreurs) ----------
-function watchGps() {
-  if (!navigator.geolocation) return;
-  navigator.geolocation.watchPosition((p) => { pos = { lat: p.coords.latitude, lng: p.coords.longitude }; }, () => {}, { enableHighAccuracy: true, maximumAge: 30000 });
+async function watchGps() {
+  const onPos = (p) => { if (p?.coords) pos = { lat: p.coords.latitude, lng: p.coords.longitude }; };
+  if (NATIVE && Native.Geolocation) {
+    try {
+      await Native.Geolocation.requestPermissions();
+      await Native.Geolocation.watchPosition({ enableHighAccuracy: true, maximumAge: 30000 }, (p) => onPos(p));
+    } catch { toast('Activez la localisation pour Fenix Livreur', true); }
+  } else if (navigator.geolocation) {
+    navigator.geolocation.watchPosition(onPos, () => {}, { enableHighAccuracy: true, maximumAge: 30000 });
+  }
   setInterval(() => {
     if (pos.lat && navigator.onLine) api('/api/driver/location', { method: 'POST', body: pos }).catch(() => {});
   }, 60000);
@@ -217,6 +227,16 @@ async function handleCode(code) {
   document.querySelector(`[data-t="${t}"]`)?.scrollIntoView({ behavior: 'smooth' });
 }
 async function openScan() {
+  if (NATIVE && Native.BarcodeScanner) {
+    // Scanner Google du téléphone (rapide, marche bien avec peu de lumière).
+    try {
+      const { available } = await Native.BarcodeScanner.isGoogleBarcodeScannerModuleAvailable().catch(() => ({ available: true }));
+      if (!available) { toast('Préparation du scanner, réessayez dans un instant…'); await Native.BarcodeScanner.installGoogleBarcodeScannerModule().catch(() => {}); return; }
+      const { barcodes } = await Native.BarcodeScanner.scan({ formats: ['QR_CODE'] });
+      if (barcodes?.[0]?.rawValue) return run(handleCode)(barcodes[0].rawValue);
+      return;
+    } catch { /* annulé ou indisponible : scanner web ci-dessous */ }
+  }
   $('#scanArea').classList.remove('hidden');
   try {
     scanner = new Html5Qrcode('scanBox');

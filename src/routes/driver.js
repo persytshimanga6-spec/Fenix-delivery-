@@ -55,6 +55,7 @@ r.post('/shipments/:t/deliver', upload.single('photo'), (req, res) => {
   const s = mine(req, req.params.t);
   if (s.status !== 'en_livraison') fail(409, 'Démarrez d’abord la livraison');
   if (s.pickup_agency_id) fail(409, 'Ce colis doit être déposé à l’agence de retrait');
+  if (!req.file) fail(400, 'Photo du colis remis obligatoire');
   res.json(handOver(s, req.user, {
     otp: req.body.otp, method: req.body.method, photo: req.file?.filename || null, ...pos(req.body),
     holder: { type: 'livreur', id: req.user.id }

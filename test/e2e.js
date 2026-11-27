@@ -160,8 +160,12 @@ try {
     await driver.ok('POST', '/api/driver/location', { lat: -4.35, lng: 15.33 });
     const t = await pub.ok('GET', `/api/track/${s1.tracking}`);
     assert.equal(t.driver.name, 'Jonathan');
-    const wrong = await driver.call('POST', `/api/driver/shipments/${s1.tracking}/deliver`, { otp: '0000' === s1.otp_demo ? '1111' : '0000', method: 'cash' });
-    assert.equal(wrong.status, 400);
+    const photo = (otp) => { const fd = new FormData(); fd.append('otp', otp);
+      fd.append('photo', new Blob([Buffer.from([0xff, 0xd8, 0xff, 0xd9])], { type: 'image/jpeg' }), 'colis.jpg'); return fd; };
+    const noPhoto = await driver.call('POST', `/api/driver/shipments/${s1.tracking}/deliver`, { otp: s1.otp_demo });
+    assert.equal(noPhoto.status, 400); // photo obligatoire
+    const wrong = await driver.call('POST', `/api/driver/shipments/${s1.tracking}/deliver`, photo('0000' === s1.otp_demo ? '1111' : '0000'), true);
+    assert.equal(wrong.status, 400); // mauvais code
     const mine0 = await driver.ok('GET', '/api/driver/shipments');
     assert.equal(mine0.shipments.find((x) => x.tracking === s1.tracking).due.total, 0); // rien à encaisser
     const fd = new FormData();
@@ -197,7 +201,9 @@ try {
     const f = await driver.ok('POST', `/api/driver/shipments/${s2.tracking}/fail`, { reason: 'Client absent' });
     assert.equal(f.status, 'echec'); assert.equal(f.attempts, 1);
     await driver.ok('POST', `/api/driver/shipments/${s2.tracking}/start`, {});
-    const ok = await driver.ok('POST', `/api/driver/shipments/${s2.tracking}/deliver`, { otp: s2.otp_demo });
+    const fd2 = new FormData(); fd2.append('otp', s2.otp_demo);
+    fd2.append('photo', new Blob([Buffer.from([0xff, 0xd8, 0xff, 0xd9])], { type: 'image/jpeg' }), 'colis.jpg');
+    const ok = await driver.ok('POST', `/api/driver/shipments/${s2.tracking}/deliver`, fd2, true);
     assert.equal(ok.status, 'livre'); // rien à encaisser : facturé au commerçant
   });
 

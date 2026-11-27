@@ -1,0 +1,61 @@
+# Construit l'appli Android « Fenix Livreur » (APK) et la publie dans les Releases du dépôt.
+# Lien de téléchargement fixe : https://github.com/<compte>/<dépôt>/releases/latest/download/fenix-livreur.apk
+name: Appli Android Fenix Livreur
+
+on:
+  push:
+    branches: [main]
+    paths: ['mobile/**', 'public/livreur/**', '.github/workflows/android.yml']
+  workflow_dispatch:
+    inputs:
+      server:
+        description: "Adresse du serveur Fenix (ex. https://fenix.promarketmalchena.com)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      FENIX_SERVER: ${{ inputs.server || vars.FENIX_SERVER || 'http://64.23.191.226:8081' }}
+      HAS_KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - name: Installer Capacitor
+        working-directory: mobile
+        run: npm ci
+      - name: Régler l'adresse du serveur et synchroniser
+        working-directory: mobile
+        run: npm run sync
+      - name: Clé de signature de production (si elle existe)
+        if: env.HAS_KS == 'true'
+        env: { KS: "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" }
+        run: echo "$KS" | base64 -d > "$RUNNER_TEMP/release.keystore" && echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+      - name: Construire l'APK
+        working-directory: mobile/android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease -PversionCode=${{ github.run_number }}
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/fenix-livreur.apk"
+      - uses: actions/upload-artifact@v4
+        with: { name: fenix-livreur-apk, path: "${{ runner.temp }}/fenix-livreur.apk" }
+      - name: Publier la version
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: livreur-1.0.${{ github.run_number }}
+          name: Fenix Livreur 1.0.${{ github.run_number }}
+          body: |
+            Appli Android « Fenix Livreur ». Serveur : ${{ env.FENIX_SERVER }}
+            Installer : ouvrir fenix-livreur.apk sur le téléphone Android, autoriser l'installation, puis ouvrir Fenix Livreur.
+          files: ${{ runner.temp }}/fenix-livreur.apk
+          make_latest: true

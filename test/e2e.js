@@ -79,7 +79,8 @@ try {
     const km = q1.distance_km, min = Math.max(1, Math.round(km / 30 * 60));
     const up = (x) => Math.ceil(x / 100) * 100;
     assert.equal(q1.minutes, min);
-    assert.equal(q1.price_fc, 4000 + up(km * 0.03 * 2640) + up(min * 100) + 1000); // + 2 % de 50 000
+    assert.equal(q1.price_fc, 4000 + up(km * 0.03 * 2640) + up(min * 100)); // pas de frais sur la marchandise
+    assert.ok(!q1.lines.some((l) => /Encaissement/.test(l.label)));
     assert.ok(q1.lines.some((l) => l.label.startsWith('Carburant')) && q1.lines.some((l) => l.label.startsWith('Trafic')));
     assert.ok(!JSON.stringify(q1).includes('%'), 'aucun supplément en %');
     // Le client ne voit ni carburant ni trafic : regroupés dans « Distance », les lignes s'additionnent.
@@ -93,8 +94,8 @@ try {
     assert.ok(!m.lines.some((l) => /Carburant|Trafic/.test(l.label)));
   });
   await step('le commerçant crée un envoi payé par M-Pesa (marchandise encaissée à la livraison)', async () => {
-    assert.equal((await merch.call('POST', '/api/merchant/shipments', { ...order, payment_ref: '' })).status, 400);
-    assert.equal((await merch.call('POST', '/api/merchant/shipments', { ...order, pay_method: 'cod' })).status, 400);
+    assert.equal((await merch.call('POST', '/api/merchant/shipments', { ...order, pay_method: 'compte' })).status, 400); // marchandise : le client paie tout avant
+    assert.equal((await merch.call('POST', '/api/merchant/shipments', { ...order, cod_amount_fc: 0, payment_ref: '' })).status, 400);
     const missing = await merch.call('POST', '/api/merchant/shipments', { ...order, to_lat: null });
     assert.equal(missing.status, 400);
     s1 = await merch.ok('POST', '/api/merchant/shipments', order);
@@ -112,8 +113,9 @@ try {
     const t = await pub.ok('GET', `/api/track/${s1.tracking}`);
     assert.equal(t.status, 'cree');
     assert.equal(t.recipient_phone, undefined);
-    assert.equal(t.due_fc, 50000); // seulement la marchandise : le port est payé avant
+    assert.equal(t.due_fc, 0); // rien à payer à la livraison
     assert.equal(t.payment, 'en_attente');
+    assert.equal(t.price_fc, s1.price_fc + 50000); // à payer avant le départ : livraison + marchandise
   });
   await step('étiquette : propriétaire oui, autre commerçant non', async () => {
     const lbl = await merch.ok('GET', `/etiquette/${s1.tracking}`);
@@ -133,7 +135,7 @@ try {
     assert.equal((await admin.call('POST', `/api/admin/shipments/${s1.tracking}/assign`, { driver_id: jk.id })).status, 402);
     assert.equal((await agent.call('POST', '/api/agency/depot-scan', { tracking: s1.tracking })).status, 402);
     const pend = await agent.ok('GET', '/api/agency/payments');
-    assert.ok(pend.some((x) => x.tracking === s1.tracking && x.payment_ref === 'MP2611AB12'));
+    assert.ok(pend.some((x) => x.tracking === s1.tracking && x.payment_ref === 'MP2611AB12' && x.total_fc === s1.price_fc + 50000));
     const c = await admin.ok('POST', `/api/admin/shipments/${s1.tracking}/confirm-payment`, {});
     assert.equal(c.payment_status, 'paye'); assert.equal(c.shipping_paid, 1);
     assert.equal((await admin.call('POST', `/api/admin/shipments/${s1.tracking}/confirm-payment`, {})).status, 409);
@@ -160,8 +162,8 @@ try {
     assert.equal(t.driver.name, 'Jonathan');
     const wrong = await driver.call('POST', `/api/driver/shipments/${s1.tracking}/deliver`, { otp: '0000' === s1.otp_demo ? '1111' : '0000', method: 'cash' });
     assert.equal(wrong.status, 400);
-    const noPay = await driver.call('POST', `/api/driver/shipments/${s1.tracking}/deliver`, { otp: s1.otp_demo });
-    assert.equal(noPay.status, 400);
+    const mine0 = await driver.ok('GET', '/api/driver/shipments');
+    assert.equal(mine0.shipments.find((x) => x.tracking === s1.tracking).due.total, 0); // rien à encaisser
     const fd = new FormData();
     fd.append('otp', s1.otp_demo); fd.append('method', 'cash');
     fd.append('photo', new Blob([Buffer.from([0xff, 0xd8, 0xff, 0xd9])], { type: 'image/jpeg' }), 'colis.jpg');
@@ -169,14 +171,14 @@ try {
     assert.equal(done.status, 'livre');
     assert.ok(done.photo);
     const cash = await driver.ok('GET', '/api/driver/cash');
-    assert.equal(cash[0].total, 50000);
+    assert.equal(cash.length, 0); // le livreur ne touche pas d'argent
     await new Promise((r) => setTimeout(r, 20));
     const mine = await merch.ok('GET', '/api/merchant/notifications');
     assert.ok(!mine.some((m) => m.message.includes(`livraison : ${s1.otp_demo}`)), 'le commerçant ne voit pas le code du client');
     for (const subj of ['Colis ramassé', 'Votre colis est en route', 'Colis livré']) {
       assert.ok(mine.some((m) => m.channel === 'email' && m.subject?.startsWith(subj)), `notification : ${subj}`);
     }
-    assert.ok(mine.some((m) => m.audience === 'vendeur' && m.message.includes('encaissés pour vous')), 'vendeur prévenu de l’argent encaissé');
+    assert.ok(mine.some((m) => m.audience === 'vendeur' && m.message.includes('reversés sur votre compte')), 'vendeur prévenu du reversement');
   });
   await step('mon compte : e-mail et choix des notifications', async () => {
     const bad = await merch.call('PATCH', '/api/merchant/profile', { email: 'pas-un-email' });
@@ -233,7 +235,7 @@ try {
     const d = await agent.ok('POST', '/api/agency/depot-scan', { tracking: s4.tracking });
     assert.equal(d.shelf, 'LUKUNGA · GOMBE');
   });
-  let pubMomo, pubCash;
+  let pubMomo, pubCash, s5Price;
   await step('réservation en ligne : payée avant le départ (Mobile Money, puis espèces au comptoir)', async () => {
     const book = { sender_name: 'Rachel', sender_phone: '0817777777', from_commune: 'Lemba', from_landmark: 'Arrêt Righini',
       recipient_name: 'Paul', recipient_phone: '0818888888', to_commune: 'Gombe', to_landmark: 'Boulevard du 30 juin', to_lat: -4.31, to_lng: 15.3, size: 'petit' };
@@ -254,6 +256,19 @@ try {
     const sms = await admin.ok('GET', '/api/admin/sms');
     assert.ok(sms.some((m) => m.message.includes('Paiement de') && m.message.includes(pubCash.tracking)));
   });
+  await step('client d’un commerçant : paie livraison + marchandise par le lien, avant le départ', async () => {
+    const s5 = await merch.ok('POST', '/api/merchant/shipments', { ...order, payment_ref: '', size: 'petit', cod_amount_fc: 30000 });
+    assert.equal(s5.payment_status, 'en_attente');
+    const sms = await admin.ok('GET', '/api/admin/sms');
+    assert.ok(sms.some((m) => m.phone === '0899999999' && m.message.includes(`/payer.html?n=${s5.tracking}`)));
+    const info = await pub.ok('GET', `/api/pay/${s5.tracking}`);
+    assert.equal(info.total_fc, s5.price_fc + 30000); assert.equal(info.goods_fc, 30000);
+    assert.equal((await pub.call('POST', `/api/pay/${s5.tracking}`, { phone: '0811111111', pay_method: 'mpesa', payment_ref: 'MP99887766' })).status, 403);
+    await pub.ok('POST', `/api/pay/${s5.tracking}`, { phone: '+243 899 999 999', pay_method: 'airtel', payment_ref: 'AM99887766' });
+    const ok = await admin.ok('POST', `/api/admin/shipments/${s5.tracking}/confirm-payment`, {});
+    assert.equal(ok.payment_status, 'paye'); assert.equal(ok.pay_method, 'airtel');
+    s5Price = s5.price_fc;
+  });
   await step('vente d’articles et de services, stock et reçu', async () => {
     const info = await agent.ok('GET', '/api/agency/info');
     const carton = info.products.find((p) => p.name === 'Carton moyen');
@@ -273,10 +288,7 @@ try {
   console.log('Caisse du soir et reversements');
   await step('remise de caisse : livreur avec écart, agence', async () => {
     const c = await admin.ok('GET', '/api/admin/cash');
-    const jkCash = c.open.find((o) => o.holder_type === 'livreur' && o.holder_id === jk.id);
-    assert.equal(jkCash.cash_fc, 50000);
-    const close = await admin.ok('POST', '/api/admin/cash/close', { holder_type: 'livreur', holder_id: jk.id, given_cash_fc: 46000, note: 'Manque 4 000' });
-    assert.equal(close.gap_fc, -4000);
+    assert.ok(!c.open.some((o) => o.holder_type === 'livreur'), 'aucun argent chez les livreurs');
     assert.equal((await admin.call('POST', '/api/admin/cash/close', { holder_type: 'livreur', holder_id: jk.id, given_cash_fc: 0 })).status, 409);
     const ag = await agent.ok('POST', '/api/agency/close', { given_cash_fc: s3.price_fc + pubCash.price_fc });
     assert.equal(ag.expected_cash_fc, s3.price_fc + pubCash.price_fc); assert.equal(ag.mobile_fc, 10000 + pubMomo.price_fc); assert.equal(ag.gap_fc, 0);
@@ -333,7 +345,10 @@ try {
     assert.equal(d.delivered_today, 3);
     assert.equal(d.sales_today_fc, 10000);
     const rep = await admin.ok('GET', '/api/admin/report');
-    assert.equal(rep[0].shipments, 6);
+    assert.equal(rep[0].shipments, 7);
+    // Revenus de Fenix = prix des livraisons seulement, jamais la marchandise des commerçants.
+    const all = await admin.ok('GET', '/api/admin/shipments');
+    assert.equal(rep[0].revenue_fc, all.filter((x) => x.status !== 'annule').reduce((t, x) => t + x.price_fc, 0));
   });
   await step('nouvel agent, nouveau point relais, nouvel article', async () => {
     const a = await admin.ok('POST', '/api/admin/agencies', { name: 'Relais Masina', kind: 'relais', commune: 'Masina', commission_pct: 10 });

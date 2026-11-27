@@ -27,7 +27,6 @@ const RATES = { 1: [5000, 7000, 10000], 2: [7000, 9000, 13000], 3: [10000, 13000
 const SETTINGS = {
   company_name: 'Fenix Delivery',
   express_supplement_fc: '5000',
-  cod_fee_pct: '2',          // frais sur l'argent encaissé pour le commerçant
   retry_fee_fc: '3000',      // deuxième tentative ou retour
   insurance_pct: '1',        // % de la valeur déclarée
   driver_share_pct: '60',    // part du livreur sur le prix du port

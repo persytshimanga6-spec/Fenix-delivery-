@@ -53,7 +53,7 @@
 
   <section data-panel="envois" class="stack">
     <div class="spread"><h1>Mes envois</h1><a class="btn primary" href="#nouveau">+ Nouvel envoi</a></div>
-    <div class="card scroll"><table><thead><tr><th>N° de suivi</th><th>Destinataire</th><th>Commune</th><th>Prix</th><th>À encaisser</th><th>Statut</th><th></th></tr></thead>
+    <div class="card scroll"><table><thead><tr><th>N° de suivi</th><th>Destinataire</th><th>Commune</th><th>Livraison</th><th>Marchandise</th><th>Statut</th><th></th></tr></thead>
     <tbody id="list"></tbody></table></div>
   </section>
 
@@ -80,8 +80,8 @@
         <div class="label">Colis</div>
         <div class="pills" id="size"></div>
         <label class="f">Contenu (facultatif)<input name="description" placeholder="Ex. 2 paires de chaussures"></label>
-        <label class="f">Valeur de la marchandise à encaisser (FC)<input name="cod_amount_fc" type="number" min="0" step="100" value="0"></label>
-        <p class="tiny muted" style="margin:0">Laissez 0 si le client a déjà payé la marchandise.</p>
+        <label class="f">Prix de la marchandise à faire payer au client (FC)<input name="cod_amount_fc" id="codAmount" type="number" min="0" step="100" value="0"></label>
+        <p class="tiny muted" style="margin:0">Le client paie la livraison + la marchandise <strong>avant l'envoi</strong>. La marchandise vous est reversée en entier sous 48 h après la livraison. Laissez 0 s'il vous a déjà payé.</p>
         <label class="row small"><input type="checkbox" name="express"> Express (moins de 2 h)</label>
         <label class="row small"><input type="checkbox" name="insured" id="insured"> Assurer le colis</label>
         <label class="f hidden" id="valueField">Valeur déclarée (FC)<input name="declared_value_fc" type="number" min="0" step="100"></label>
@@ -90,8 +90,17 @@
           <div id="quoteLines" class="small"></div>
           <div class="spread"><span>Prix de la livraison</span><strong id="price" style="font-size:20px">—</strong></div>
         </div>
+        <div id="payOwn" class="stack">
         <div class="label">Paiement de la livraison (avant le départ du colis)</div>
         <div class="pills" id="pay"></div>
+        </div>
+        <div id="payClient" class="card stack hidden" style="background:var(--bg)">
+          <div class="label">Le client paie avant l'envoi</div>
+          <div class="small" id="clientTotal"></div>
+          <p class="tiny muted" style="margin:0">Il reçoit un SMS avec le lien pour payer par Mobile Money. S'il vous a déjà donné une référence, entrez-la :</p>
+          <div class="grid"><select id="clientMethod"><option value="mpesa">M-Pesa</option><option value="airtel">Airtel Money</option><option value="orange">Orange Money</option></select>
+          <input id="clientRef" placeholder="Référence (facultatif)" autocomplete="off"></div>
+        </div>
         <div id="momoBox" class="card stack hidden" style="background:var(--bg)">
           <div class="small" id="momoHint"></div>
           <label class="f">Référence de la transaction<input name="payment_ref" id="payRef" placeholder="Ex. MP2611AB12" autocomplete="off"></label>
@@ -105,7 +114,7 @@
   <section data-panel="argent" class="stack hidden">
     <h1>Mon argent</h1>
     <div class="grid">
-      <div class="card kpi"><div class="label">À recevoir</div><div class="v" id="mToReceive">—</div><div class="tiny muted">Marchandise encaissée, reversée sous 48 h</div></div>
+      <div class="card kpi"><div class="label">À recevoir</div><div class="v" id="mToReceive">—</div><div class="tiny muted">Marchandise payée d'avance par vos clients, reversée en entier sous 48 h après la livraison</div></div>
       <div class="card kpi"><div class="label">Déjà reversé</div><div class="v" id="mPaid">—</div></div>
       <div class="card kpi"><div class="label">Livraisons à payer</div><div class="v" id="mUnpaid">—</div><div class="tiny muted">Envois « sur mon compte »</div></div>
     </div>
@@ -177,7 +186,7 @@ const loadList = run(async () => {
   const rows = await api('/api/merchant/shipments');
   $('#list').innerHTML = rows.map((r) => `<tr><td><a href="/suivi?n=${esc(r.tracking)}">${esc(r.tracking)}</a><div class="tiny muted">${when(r.created_at)}</div></td>
     <td>${esc(r.recipient_name)}<div class="tiny muted">${esc(r.recipient_phone)}</div></td><td>${esc(r.to_commune)}</td>
-    <td>${fc(r.price_fc)}<div class="tiny muted">${esc(PAY[r.pay_method] || '')}${r.payment_status === 'en_attente' ? ' · <span style="color:#F4B683">paiement en attente</span>' : ''}</div></td><td>${r.cod_amount_fc ? fc(r.cod_amount_fc) : '—'}</td>
+    <td>${fc(r.price_fc)}<div class="tiny muted">${esc(PAY[r.pay_method] || '')}${r.payment_status === 'en_attente' ? ' · <span style="color:#F4B683">paiement en attente</span>' : ''}</div></td><td>${r.cod_amount_fc ? `${fc(r.cod_amount_fc)}${r.payment_status === 'en_attente' ? '<div class="tiny muted">client pas encore payé</div>' : '<div class="tiny muted">payée d’avance</div>'}` : '—'}</td>
     <td>${badge(r.status, r.label)}</td><td><a class="btn" href="/etiquette/${esc(r.tracking)}" target="_blank" rel="noopener">Étiquette</a></td></tr>`).join('')
     || '<tr><td colspan="7" class="muted">Aucun envoi pour l’instant.</td></tr>';
 });
@@ -231,7 +240,14 @@ const setMode = (v) => {
 pills($('#mode'), [['domicile', 'À domicile'], ['agence', 'Retrait en agence']], order.mode, setMode);
 setMode('domicile');
 pills($('#size'), [['petit', 'Petit · enveloppe, bijou'], ['moyen', 'Moyen · chaussures'], ['grand', 'Grand · carton']], order.size, (v) => { order.size = v; quote(); });
+const goods = () => Number($('#codAmount').value) || 0;
 const payHint = () => {
+  const g = goods();
+  $('#payOwn').classList.toggle('hidden', g > 0); $('#payClient').classList.toggle('hidden', g === 0);
+  if (g > 0) {
+    $('#clientTotal').innerHTML = `Livraison ${order.price ? fc(order.price) : '—'} + marchandise ${fc(g)} = <strong>${order.price ? fc(order.price + g) : '—'}</strong>`;
+    $('#momoBox').classList.add('hidden'); return;
+  }
   const mobile = order.pay_method !== 'compte';
   $('#momoBox').classList.toggle('hidden', !mobile);
   if (!mobile) return;
@@ -246,7 +262,8 @@ form.onsubmit = run(async (e) => {
   e.preventDefault();
   const f = Object.fromEntries(new FormData(form));
   const body = { ...f, size: order.size, pay_method: order.pay_method, express: !!f.express, insured: !!f.insured };
-  if (order.pay_method === 'compte') delete body.payment_ref;
+  if (goods() > 0) { body.pay_method = $('#clientMethod').value; body.payment_ref = $('#clientRef').value.trim(); }
+  else if (order.pay_method === 'compte') delete body.payment_ref;
   if (order.mode === 'domicile') { body.to_lat = order.to_lat; body.to_lng = order.to_lng; delete body.pickup_agency_id; }
   else { delete body.to_landmark; }
   const s = await api('/api/merchant/shipments', { method: 'POST', body });

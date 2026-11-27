@@ -144,7 +144,7 @@ function card(s) {
         : `<div><div class="tiny muted">Livrer à</div><strong>${esc(s.recipient_name)}</strong> · ${esc(s.to_commune)}<div class="repere small">Repère : ${esc(s.to_landmark || '')}</div></div>`}
     ${s.shelf ? `<div class="tiny muted">Étagère : ${esc(s.shelf)}</div>` : ''}
     ${s.payment_status === 'en_attente' ? '<div class="due" style="color:#F4B683">Non payé : ne pas prendre ce colis</div>' : ''}
-    ${!pickup && !toAgency && s.due.total ? `<div class="due">À encaisser : ${fc(s.due.total)}</div>` : ''}
+    ${!pickup && !toAgency && s.due.total ? `<div class="due">Ancien colis, à encaisser : ${fc(s.due.total)}</div>` : ''}
     ${s.attempts ? `<div class="tiny muted">Tentatives : ${s.attempts}</div>` : ''}
     <div class="row" style="gap:8px">
       ${link ? `<a class="btn blue" style="flex:1" href="${link}" target="_blank" rel="noopener">Naviguer</a>` : ''}
@@ -207,7 +207,7 @@ $('#manual').onsubmit = (e) => { e.preventDefault(); run(handleCode)($('#manualT
 function openDeliver(s) {
   current = s; payMethod = 'cash';
   $('#deliverForm').reset();
-  $('#dInfo').innerHTML = `${esc(s.tracking)} · ${esc(s.recipient_name)}${s.due.total ? `<div class="due" style="font-size:18px">Encaisser : ${fc(s.due.total)}</div>` : '<div>Rien à encaisser</div>'}`;
+  $('#dInfo').innerHTML = `${esc(s.tracking)} · ${esc(s.recipient_name)}${s.due.total ? `<div class="due" style="font-size:18px">Ancien colis, à encaisser : ${fc(s.due.total)}</div>` : '<div>Payé d’avance : rien à demander au client</div>'}`;
   $('#dPayBox').classList.toggle('hidden', !s.due.total);
   pills($('#dPay'), ['cash', 'mpesa', 'orange', 'airtel'].map((m) => [m, PAY[m]]), payMethod, (v) => (payMethod = v));
   $('#deliver').showModal();

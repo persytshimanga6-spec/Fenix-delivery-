@@ -153,8 +153,14 @@ const pages = {
 
   // ---------------- Caisse du soir ----------------
   async caisse() {
-    const c = await api('/api/admin/cash');
+    const [c, po] = await Promise.all([api('/api/admin/cash'), api('/api/admin/payouts')]);
     view.innerHTML = `<div class="stack" style="gap:20px"><h1>Caisse du soir</h1>
+      <div class="card scroll"><div class="spread"><h2>À reverser aux commerçants</h2><a href="#" data-go="reversements" class="small">Faire les virements</a></div>
+        <p class="muted small" style="margin:0 0 8px">Marchandise payée d'avance par les clients. Ce n'est pas l'argent de Fenix : elle passe en entier sur le compte du commerçant, sous 48 h.</p>
+        <table><thead><tr><th>Commerçant</th><th>Compte</th><th>Colis livrés</th><th>Montant</th><th>Depuis</th></tr></thead><tbody>
+        ${po.due.map((d) => `<tr><td>${esc(d.name)}</td><td class="small">${esc(PAY[d.payout_operator] || d.payout_operator || '')} · ${esc(d.payout_number || '')}</td>
+          <td>${d.shipments}</td><td><strong>${fc(d.amount_fc)}</strong></td><td class="small">${when(d.oldest)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Rien à reverser.</td></tr>'}
+        </tbody></table></div>
       <div class="card scroll"><h2>Argent à récupérer</h2><table><thead><tr><th>Qui</th><th>Cash attendu</th><th>Mobile Money</th><th>Colis</th><th>Cash rendu</th><th></th></tr></thead><tbody>
       ${c.open.map((o) => `<tr><td><strong>${esc(o.name)}</strong><div class="tiny muted">${o.holder_type}</div></td><td>${fc(o.cash_fc)}</td><td>${fc(o.mobile_fc)}</td><td>${o.shipments}</td>
         <td><input type="number" min="0" step="100" value="${o.cash_fc}" id="g-${o.holder_type}-${o.holder_id}" style="width:140px"></td>
@@ -303,7 +309,6 @@ const pages = {
       <div class="card grid">
         <label class="f">Nom de la société<input name="company_name" value="${esc(S.company_name)}"></label>
         <label class="f">Supplément express (FC)<input name="express_supplement_fc" type="number" value="${esc(S.express_supplement_fc)}"></label>
-        <label class="f">Frais d'encaissement (% de la marchandise)<input name="cod_fee_pct" type="number" step="0.1" value="${esc(S.cod_fee_pct)}"></label>
         <label class="f">Assurance (% de la valeur)<input name="insurance_pct" type="number" step="0.1" value="${esc(S.insurance_pct)}"></label>
         <label class="f">Deuxième tentative / retour (FC)<input name="retry_fee_fc" type="number" value="${esc(S.retry_fee_fc)}"></label>
         <label class="f">Part du livreur (% du prix)<input name="driver_share_pct" type="number" value="${esc(S.driver_share_pct)}"></label>
@@ -334,8 +339,8 @@ const pages = {
       <div class="card scroll"><table><thead><tr><th>N° de suivi</th><th>Expéditeur</th><th>Trajet</th><th>Montant</th><th>Moyen · référence</th><th></th></tr></thead><tbody>
       ${rows.map((s) => `<tr><td>${esc(s.tracking)}<div class="tiny muted">${when(s.created_at)}</div></td>
         <td>${esc(s.sender_name)}<div class="tiny muted">${esc(s.sender_phone)}</div></td><td class="small">${esc(s.from_commune)} → ${esc(s.to_commune)}</td>
-        <td><strong>${fc(s.price_fc)}</strong></td><td class="small">${esc(PAY[s.pay_method] || s.pay_method)}${s.payment_ref ? `<div class="tiny">${esc(s.payment_ref)}</div>` : ''}</td>
-        <td>${s.pay_method === 'cash' ? '<span class="small muted">Au comptoir</span>' : `<button class="primary" data-confirm="${esc(s.tracking)}">Paiement vérifié</button>`}</td></tr>`).join('')
+        <td><strong>${fc(s.total_fc)}</strong>${s.cod_amount_fc ? `<div class="tiny muted">livraison ${fc(s.price_fc)} + marchandise ${fc(s.cod_amount_fc)} (au commerçant)</div>` : ''}</td><td class="small">${esc(PAY[s.pay_method] || s.pay_method)}${s.payment_ref ? `<div class="tiny">${esc(s.payment_ref)}</div>` : '<div class="tiny muted">référence pas encore reçue</div>'}</td>
+        <td>${s.pay_method === 'cash' ? '<span class="small muted">Au comptoir</span>' : s.payment_ref ? `<button class="primary" data-confirm="${esc(s.tracking)}">Paiement vérifié</button>` : '<span class="small muted">En attente du client</span>'}</td></tr>`).join('')
         || '<tr><td colspan="6" class="muted">Aucun paiement en attente.</td></tr>'}
       </tbody></table></div></div>`;
     view.querySelector('tbody').onclick = run(async (e) => {
@@ -394,7 +399,7 @@ view.addEventListener('click', run(async (e) => {
       <div><div class="label">De</div>${esc(s.sender_name)} · ${esc(s.sender_phone)}<br>${esc(s.from_commune)} · ${esc(s.from_landmark || '')}</div>
       <div><div class="label">À</div>${esc(s.recipient_name)} · ${esc(s.recipient_phone)}<br>${esc(s.to_commune)} · ${esc(s.to_landmark || 'Retrait en agence')}</div>
       <div><div class="label">Colis</div>${esc(s.size)} · ${esc(s.description || '')}<br>Prix ${fc(s.price_fc)} · ${esc(PAY[s.pay_method] || '')} · ${esc(PAY_STATE[s.payment_status] || (s.shipping_paid ? 'Payé' : ''))}${s.payment_ref ? ` · réf. ${esc(s.payment_ref)}` : ''}</div>
-      <div><div class="label">À encaisser</div>${fc(s.due.total)}${s.cod_amount_fc ? ` (dont marchandise ${fc(s.cod_amount_fc)})` : ''}</div>
+      <div><div class="label">Marchandise</div>${s.cod_amount_fc ? `${fc(s.cod_amount_fc)}, payée d'avance, reversée au commerçant` : '—'}${s.due.total ? `<br>Ancien colis, à encaisser : ${fc(s.due.total)}` : ''}</div>
     </div>
     ${s.photo ? `<a href="/photos/${esc(s.photo)}" target="_blank" rel="noopener">Voir la photo de livraison</a>` : ''}
     <ol class="timeline">${s.events.map((ev) => `<li><div><strong>${esc(ev.label)}</strong> <span class="tiny muted">${when(ev.created_at)} · ${esc(ev.user_name || '')}</span>${ev.note ? `<div class="small muted">${esc(ev.note)}</div>` : ''}</div></li>`).join('')}</ol>

@@ -37,8 +37,9 @@ r.get('/info', (req, res) => {
 r.post('/shipments', async (req, res) => res.status(201).json(await createShipment(req.body, req.user, { agency: req.agency })));
 
 // Paiements à confirmer : réservations en ligne et envois Mobile Money des commerçants.
-r.get('/payments', (_req, res) => res.json(db.prepare(`SELECT id, tracking, sender_name, sender_phone, from_commune, to_commune, price_fc,
-  pay_method, payment_ref, created_at FROM shipments WHERE payment_status = 'en_attente' AND status != 'annule' ORDER BY id DESC LIMIT 200`).all()));
+r.get('/payments', (_req, res) => res.json(db.prepare(`SELECT id, tracking, sender_name, sender_phone, recipient_name, recipient_phone, from_commune, to_commune, price_fc, cod_amount_fc,
+  price_fc + cod_amount_fc AS total_fc, pay_method, payment_ref, merchant_id, created_at FROM shipments
+  WHERE payment_status = 'en_attente' AND status != 'annule' ORDER BY id DESC LIMIT 200`).all()));
 r.post('/shipments/:t/confirm-payment', (req, res) => {
   const { otp_hash, ...s } = confirmPayment(mustGet(req.params.t), req.user,
     { method: req.body.method, ref: req.body.ref, agency: req.agency, deposit: !!req.body.deposit });

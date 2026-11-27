@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS shipments (
   zone INTEGER, price_fc INTEGER NOT NULL,
   pay_method TEXT NOT NULL,                        -- mpesa | orange | airtel | cash | cod | compte
   shipping_paid INTEGER NOT NULL DEFAULT 0,
-  cod_amount_fc INTEGER NOT NULL DEFAULT 0,        -- valeur de la marchandise à encaisser pour le commerçant
+  cod_amount_fc INTEGER NOT NULL DEFAULT 0,        -- prix de la marchandise, payé d'avance par le client, reversé au commerçant
   status TEXT NOT NULL DEFAULT 'cree',
   driver_id INTEGER REFERENCES users(id),
   shelf TEXT,
@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS closings (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Ce qu'on doit au commerçant (marchandise encaissée à la livraison)
+-- Ce qu'on doit au commerçant : marchandise payée d'avance par le client (pas un revenu de Fenix)
 CREATE TABLE IF NOT EXISTS payouts (
   id INTEGER PRIMARY KEY,
   merchant_id INTEGER NOT NULL REFERENCES merchants(id),
@@ -203,7 +203,7 @@ addColumn('shipments', 'payment_ref', 'TEXT');
 addColumn('shipments', 'paid_at', 'TEXT');
 // Anciens réglages du prix par zone et du supplément dynamique : retirés.
 db.exec(`DELETE FROM settings WHERE key IN ('pricing_mode','km_fc','surge_on','busy_score','very_busy_score','busy_pct',
-  'very_busy_pct','traffic_hours','traffic_pct','surge_max_pct')`);
+  'very_busy_pct','traffic_hours','traffic_pct','surge_max_pct','cod_fee_pct')`);
 addColumn('shipments', 'sender_email', 'TEXT');
 
 export const setting = (key, fallback = null) => {

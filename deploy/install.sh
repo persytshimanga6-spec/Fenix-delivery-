@@ -2,7 +2,7 @@
 # Installe Fenix Delivery sur un serveur Ubuntu neuf (DigitalOcean, Hetzner…), avec HTTPS.
 # Usage (sur le serveur, en root) :  bash install.sh            → adresse gratuite xx-xx-xx-xx.sslip.io
 #                                    bash install.sh mondomaine.com  → ton propre nom de domaine
-set -euo pipefail
+set -eu  # pas de pipefail : « tr … | head -c » se termine normalement par SIGPIPE (141)
 cd "$(dirname "$0")/.."
 APP_DIR=$(pwd)
 DOMAIN="${1:-}"

@@ -333,6 +333,44 @@ try {
     assert.equal((await driver.call('GET', '/api/heatmap')).status, 403);
     await admin.ok('PUT', '/api/admin/rates', { settings: { rush_hours: '', fuel_price_fc: 2640, minute_fc: 100 } });
   });
+  await step('devenir livreur : candidature, contrôles, attente, validation', async () => {
+    const y = new Date().getFullYear();
+    const form = { last_name: 'Kabongo', post_name: 'Mutombo', first_name: 'Didier', phone: '0821234567', password: 'route123',
+      address: 'Lemba, av. Kianza 12', birth_year: y - 25, email: 'didier@exemple.com', license_no: 'KIN-B-445566',
+      disability: 'non', criminal_record: 'non', experience_years: 3 };
+    for (const k of Object.keys(form)) {
+      const { [k]: _, ...missing } = form;
+      assert.equal((await pub.call('POST', '/api/drivers/apply', missing)).status, 400, `champ obligatoire : ${k}`);
+    }
+    assert.equal((await pub.call('POST', '/api/drivers/apply', { ...form, birth_year: y - 17 })).status, 400); // moins de 18 ans
+    assert.equal((await pub.call('POST', '/api/drivers/apply', { ...form, experience_years: 1 })).status, 400); // moins de 2 ans
+    assert.equal((await pub.call('POST', '/api/drivers/apply', { ...form, disability: 'oui' })).status, 400); // précision obligatoire
+    await pub.ok('POST', '/api/drivers/apply', form);
+    assert.equal((await pub.call('POST', '/api/drivers/apply', form)).status, 409);
+    const pending = client();
+    const r = await pending.call('POST', '/api/login', { phone: '0821234567', password: 'route123' });
+    assert.equal(r.status, 403); // en attente : pas de connexion
+    const apps = await admin.ok('GET', '/api/admin/applications');
+    const app = apps.find((x) => x.phone === '0821234567');
+    assert.equal(app.full_name, 'Kabongo Mutombo Didier');
+    for (const k of ['address', 'birth_year', 'email', 'license_no', 'disability', 'criminal_record', 'experience_years']) assert.ok(k in app, k);
+    assert.equal((await admin.call('PATCH', `/api/admin/users/${app.user_id}`, { active: true })).status, 409); // pas de contournement
+    await admin.ok('POST', `/api/admin/applications/${app.user_id}`, { decision: 'valide', zone: 'Mont-Amba' });
+    const ok = client(); await ok.login('0821234567', 'route123');
+    assert.equal((await ok.call('GET', '/api/driver/shipments')).status, 200);
+    const list = await admin.ok('GET', '/api/admin/users');
+    const d = list.find((u) => u.phone === '0821234567');
+    assert.equal(d.license_no, 'KIN-B-445566'); assert.equal(d.experience_years, 3); assert.equal(d.zone, 'Mont-Amba');
+    // Refusé : pas de connexion.
+    await pub.ok('POST', '/api/drivers/apply', { ...form, phone: '0827654321', license_no: 'X-1' });
+    const app2 = (await admin.ok('GET', '/api/admin/applications')).find((x) => x.phone === '0827654321');
+    await admin.ok('POST', `/api/admin/applications/${app2.user_id}`, { decision: 'refuse' });
+    assert.equal((await client().call('POST', '/api/login', { phone: '0827654321', password: 'route123' })).status, 403);
+    // Ajout direct par le bureau : mêmes champs, validé tout de suite.
+    assert.equal((await admin.call('POST', '/api/admin/users', { role: 'livreur', phone: '0829990000', password: 'route123' })).status, 400);
+    await admin.ok('POST', '/api/admin/users', { ...form, role: 'livreur', phone: '0829990000', zone: 'Tshangu' });
+    await client().login('0829990000', 'route123');
+  });
   await step('mon compte admin : mot de passe et numéro', async () => {
     assert.equal((await admin.call('POST', '/api/me/password', { current: 'faux', password: 'nouveau123' })).status, 400);
     await admin.ok('POST', '/api/me/password', { current: 'admin123', password: 'nouveau123' });

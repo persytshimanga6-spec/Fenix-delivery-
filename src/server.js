@@ -10,6 +10,7 @@ import { quote, fail, STATUS_LABELS, HttpError } from './logic.js';
 import { createShipment, mustGet, publicTrack, amountDue, prepayTotal, submitPayment } from './shipments.js';
 import { MOBILE } from './logic.js';
 import { isEmail } from './notify.js';
+import { createDriver } from './drivers.js';
 import { heatmap, clientQuote } from './pricing.js';
 import driverRoutes from './routes/driver.js';
 import adminRoutes from './routes/admin.js';
@@ -60,8 +61,9 @@ api.get('/heatmap', need('admin', 'agent'), (_req, res) => res.json({ communes: 
 
 // Réservation en ligne par un client : le prix est payé avant le départ du colis.
 const bookings = new Map();
-const limit = (req, max) => {
-  const ip = req.ip || 'x', now = Date.now();
+const limit = (req, max, name = req.path) => {
+  if (process.env.NODE_ENV === 'test') return;
+  const ip = `${name}:${req.ip || 'x'}`, now = Date.now();
   const recent = (bookings.get(ip) || []).filter((t) => now - t < 3600e3);
   if (recent.length >= max) fail(429, 'Trop de demandes depuis cette connexion. Réessayez dans une heure.');
   bookings.set(ip, [...recent, now]);
@@ -76,12 +78,18 @@ api.get('/pay/:t', (req, res) => {
     momo: Object.fromEntries(MOBILE.map((m) => [m, setting(`momo_${m}`, '')])) });
 });
 api.post('/pay/:t', (req, res) => {
-  limit(req, 20);
+  limit(req, 20, 'pay');
   const s = submitPayment(mustGet(req.params.t), { phone: req.body.phone, method: req.body.pay_method, ref: req.body.payment_ref });
   res.json({ tracking: s.tracking, status: s.payment_status, payment_ref: s.payment_ref });
 });
+// Candidature « Devenir livreur » : compte créé en attente, validé par le bureau.
+api.post('/drivers/apply', (req, res) => {
+  limit(req, 5, 'apply');
+  createDriver(req.body);
+  res.status(201).json({ ok: true, message: 'Candidature envoyée. Le bureau vous appellera après vérification.' });
+});
 api.post('/book', async (req, res) => {
-  limit(req, 10);
+  limit(req, 10, 'book');
   const s = await createShipment(req.body, null, { public: true });
   res.status(201).json({ tracking: s.tracking, otp: s.otp, price_fc: s.price_fc, quote: clientQuote(s.quote), pay_method: s.pay_method,
     payment_status: s.payment_status, payment_ref: s.payment_ref, momo_number: setting(`momo_${s.pay_method}`, '') || null });

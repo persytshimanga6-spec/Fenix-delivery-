@@ -30,6 +30,34 @@ header.d{padding:14px 16px;display:flex;justify-content:space-between;align-item
   <form class="stack"><label class="f" style="color:#E5D6C2">Téléphone<input name="phone" type="tel" autocomplete="username" required></label>
   <label class="f" style="color:#E5D6C2">Mot de passe<input name="password" type="password" autocomplete="current-password" required></label>
   <button class="primary" type="submit">Se connecter</button></form>
+  <p class="small" style="margin:0;text-align:center">Pas encore livreur ? <a href="#postuler" id="toApply" style="color:#F4B683;font-weight:700">Devenir livreur — Postuler</a></p>
+</div></div>
+
+<div id="apply" class="narrow hidden"><div class="card stack" style="margin-top:24px">
+  <h1 style="margin:0">Postuler comme livreur</h1>
+  <p class="small muted" style="margin:0">Tous les champs sont obligatoires. Le bureau vérifie votre candidature, puis vous pourrez vous connecter.</p>
+  <form id="applyForm" class="stack">
+    <label class="f" style="color:#E5D6C2">Nom<input name="last_name" required autocomplete="family-name"></label>
+    <label class="f" style="color:#E5D6C2">Post-nom<input name="post_name" required></label>
+    <label class="f" style="color:#E5D6C2">Prénom<input name="first_name" required autocomplete="given-name"></label>
+    <div class="card" style="background:var(--night);padding:10px 12px"><div class="label">Nom complet</div><strong id="fullName">—</strong></div>
+    <label class="f" style="color:#E5D6C2">Téléphone (sert à vous connecter)<input name="phone" type="tel" required autocomplete="tel"></label>
+    <label class="f" style="color:#E5D6C2">Mot de passe (6 caractères minimum)<input name="password" type="password" minlength="6" required autocomplete="new-password"></label>
+    <label class="f" style="color:#E5D6C2">Adresse<input name="address" required autocomplete="street-address" placeholder="Commune, quartier, avenue, numéro"></label>
+    <label class="f" style="color:#E5D6C2">Année de naissance<input name="birth_year" type="number" inputmode="numeric" min="1930" required placeholder="Ex. 1998"></label>
+    <label class="f" style="color:#E5D6C2">E-mail<input name="email" type="email" required autocomplete="email"></label>
+    <label class="f" style="color:#E5D6C2">Numéro du permis de conduire<input name="license_no" required></label>
+    <label class="f" style="color:#E5D6C2">Années d'expérience de conduite
+      <select name="experience_years" required><option value="">Choisir</option><option value="1">Moins de 2 ans</option>
+        <option value="2">2 ans</option><option value="3">3 ans</option><option value="4">4 ans</option><option value="5">5 ans ou plus</option></select></label>
+    <div class="label">Handicap</div>
+    <div class="pills" id="aDis"></div>
+    <label class="f hidden" id="aDisNote" style="color:#E5D6C2">Précisez<input name="disability_note"></label>
+    <div class="label">Avez-vous déjà commis un crime ?</div>
+    <div class="pills" id="aCrime"></div>
+    <button class="primary big" type="submit">Envoyer ma candidature</button>
+  </form>
+  <p class="small" style="margin:0;text-align:center"><a href="#" id="toLogin" style="color:#F4B683">Retour à la connexion</a></p>
 </div></div>
 
 <div id="app" class="hidden">
@@ -248,8 +276,36 @@ $('#cashBtn').onclick = run(async () => {
 });
 
 $('#refresh').onclick = () => { flush(); load(); };
+
+// ---------- Postuler comme livreur ----------
+const apply = { disability: null, criminal_record: null };
+const showApply = (on) => { $('#apply').classList.toggle('hidden', !on); $('#login').classList.toggle('hidden', on); };
+$('#toApply').onclick = (e) => { e.preventDefault(); showApply(true); };
+$('#toLogin').onclick = (e) => { e.preventDefault(); showApply(false); };
+const af = $('#applyForm');
+const updateName = () => {
+  const f = new FormData(af);
+  $('#fullName').textContent = ['last_name', 'post_name', 'first_name'].map((k) => String(f.get(k) || '').trim()).filter(Boolean).join(' ') || '—';
+};
+af.oninput = updateName;
+pills($('#aDis'), [['non', 'Non'], ['oui', 'Oui']], null, (v) => { apply.disability = v; $('#aDisNote').classList.toggle('hidden', v !== 'oui'); });
+pills($('#aCrime'), [['non', 'Non'], ['oui', 'Oui']], null, (v) => (apply.criminal_record = v));
+af.onsubmit = run(async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(af));
+  if (new Date().getFullYear() - Number(f.birth_year) < 18) throw new Error('Il faut avoir 18 ans ou plus');
+  if (Number(f.experience_years) < 2) throw new Error('Il faut au moins 2 ans d’expérience de conduite');
+  if (!apply.disability) throw new Error('Handicap : répondez Oui ou Non');
+  if (!apply.criminal_record) throw new Error('Répondez à la question sur les antécédents');
+  const r = await api('/api/drivers/apply', { method: 'POST', body: { ...f, ...apply } });
+  af.reset(); updateName();
+  $('#apply .card').innerHTML = `<h1 style="margin:0">Merci !</h1><p style="margin:0">${esc(r.message)}</p>
+    <button class="primary" onclick="location.hash='';location.reload()">Retour à la connexion</button>`;
+});
+
 $('#out').onclick = logout;
-requireLogin(['livreur'], () => { watchGps(); load(); flush(); setInterval(load, 120000); });
+requireLogin(['livreur'], () => { watchGps(); load(); flush(); setInterval(load, 120000); })
+  .then(() => { if (location.hash === '#postuler' && !$('#login').classList.contains('hidden')) showApply(true); });
 </script>
 </body>
 </html>

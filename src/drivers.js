@@ -1,7 +1,7 @@
 // Candidatures des livreurs : formulaire public « Postuler », validation par le bureau.
 import { db, tx } from './db.js';
 import { fail } from './logic.js';
-import { hash, normPhone } from './auth.js';
+import { hash, normPhone, checkPassword } from './auth.js';
 import { isEmail } from './notify.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS driver_profiles (
@@ -41,7 +41,7 @@ export function checkDriverForm(b) {
     if (!p[k]) fail(400, `${l} obligatoire`);
   }
   if (!/^\+?\d{9,13}$/.test(p.phone)) fail(400, 'Numéro de téléphone invalide');
-  if (p.password.length < 6) fail(400, 'Mot de passe : 6 caractères minimum');
+  checkPassword(p.password);
   if (!isEmail(p.email)) fail(400, 'Adresse e-mail invalide');
   const year = new Date().getFullYear();
   if (!Number.isInteger(p.birth_year) || p.birth_year < year - 90 || p.birth_year > year) fail(400, 'Année de naissance invalide');
@@ -52,16 +52,22 @@ export function checkDriverForm(b) {
   p.disability_note = p.disability ? txt(b.disability_note, 300) : null;
   if (p.disability && !p.disability_note) fail(400, 'Handicap : précisez');
   p.criminal_record = yesNo(b.criminal_record, 'Antécédent criminel');
-  if (db.prepare('SELECT 1 FROM users WHERE phone = ?').get(p.phone)) fail(409, 'Ce numéro a déjà un compte');
+  p.exists = !!db.prepare('SELECT 1 FROM users WHERE phone = ?').get(p.phone);
   return p;
 }
 
 /** Crée le compte livreur et sa fiche. `validated` : ajouté par le bureau (actif tout de suite). */
-export function createDriver(b, { validated = false, by = null, zone = null } = {}) {
+export async function createDriver(b, { validated = false, by = null, zone = null, silentIfExists = false } = {}) {
   const p = checkDriverForm(b);
+  if (p.exists) {
+    // Candidature publique : on ne révèle pas qu'un compte existe déjà (réponse identique, rien n'est créé).
+    if (silentIfExists) return null;
+    fail(409, 'Ce numéro a déjà un compte');
+  }
+  const pwHash = await hash(p.password);
   return tx(() => {
     const id = db.prepare(`INSERT INTO users (role, name, phone, password_hash, zone, active, driver_kind) VALUES ('livreur', ?, ?, ?, ?, ?, ?)`)
-      .run(fullName(p), p.phone, hash(p.password), zone || null, validated ? 1 : 0, p.driver_kind).lastInsertRowid;
+      .run(fullName(p), p.phone, pwHash, zone || null, validated ? 1 : 0, p.driver_kind).lastInsertRowid;
     db.prepare(`INSERT INTO driver_profiles (user_id, last_name, post_name, first_name, address, birth_year, email, license_no,
       disability, disability_note, criminal_record, experience_years, status, decided_by, decided_at)
       VALUES (@id, @last_name, @post_name, @first_name, @address, @birth_year, @email, @license_no,

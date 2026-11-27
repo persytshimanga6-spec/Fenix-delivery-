@@ -15,6 +15,7 @@
   <h1 style="margin:0">Payer mon colis</h1>
   <form id="find" class="row card">
     <input id="n" placeholder="Numéro de suivi, ex. FX-1124-000123" required style="flex:1;min-width:200px">
+    <input id="p4" placeholder="4 derniers chiffres de votre téléphone" inputmode="numeric" maxlength="4" required style="width:250px">
     <button class="primary">Afficher</button>
   </form>
   <div id="out" class="stack"></div>
@@ -25,7 +26,7 @@ const n = new URLSearchParams(location.search).get('n');
 let method = 'mpesa';
 
 const show = run(async (t) => {
-  const p = await api('/api/pay/' + encodeURIComponent(t));
+  const p = await api('/api/pay/' + encodeURIComponent(t) + '?phone=' + encodeURIComponent($('#p4').value.trim()));
   if (p.status !== 'en_attente') {
     $('#out').innerHTML = `<div class="card"><strong>${esc(p.tracking)}</strong> : ce colis est déjà payé. <a href="/suivi?n=${encodeURIComponent(p.tracking)}">Suivre le colis</a></div>`;
     return;
@@ -62,7 +63,7 @@ const show = run(async (t) => {
   });
 });
 $('#find').onsubmit = (e) => { e.preventDefault(); show($('#n').value.trim()); };
-if (n) { $('#n').value = n; show(n); }
+if (n) { $('#n').value = n; $('#p4').focus(); }
 </script>
 </body>
 </html>

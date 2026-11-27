@@ -36,11 +36,21 @@ if [ ! -f .env ] || ! grep -q '^JWT_SECRET=' .env; then
   [ -f .env ] || cp .env.example .env
   PASS=$(grep '^ADMIN_PASSWORD=' .env | cut -d= -f2)
   if [ -z "$PASS" ] || [ "$PASS" = "change-moi-tout-de-suite" ] || [ "$PASS" = "CHANGE-MOI" ]; then PASS=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 12); fi
-  sed -i "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=$PASS|; s|^SEED_DEMO=.*|SEED_DEMO=0|; s|^COOKIE_SECURE=.*|COOKIE_SECURE=0|" .env
+  sed -i "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=$PASS|; s|^SEED_DEMO=.*|SEED_DEMO=0|" .env
   echo "JWT_SECRET=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 48)" >> .env
   echo "$PASS" > .admin-password
 fi
-sed -i "s|^PUBLIC_URL=.*|PUBLIC_URL=http://$IP:$PORT|" .env
+# Adresse publique : on garde une adresse HTTPS déjà réglée ; sinon http://IP:PORT (installation de départ).
+CUR_URL=$(grep '^PUBLIC_URL=' .env | cut -d= -f2-)
+case "$CUR_URL" in
+  https://*) echo "   Adresse publique gardée : $CUR_URL" ;;
+  *) sed -i "s|^PUBLIC_URL=.*|PUBLIC_URL=http://$IP:$PORT|" .env; CUR_URL="http://$IP:$PORT" ;;
+esac
+# En HTTPS, le cookie de connexion est toujours « secure » (jamais remis à 0 par ce script).
+case "$CUR_URL" in
+  https://*) if grep -q '^COOKIE_SECURE=' .env; then sed -i "s|^COOKIE_SECURE=.*|COOKIE_SECURE=1|" .env; else echo "COOKIE_SECURE=1" >> .env; fi ;;
+esac
+grep -q '^NODE_ENV=' .env || echo "NODE_ENV=production" >> .env
 chmod 600 .env; [ -f .admin-password ] && chmod 600 .admin-password
 
 echo "== 4/6 Construction et démarrage (projet « fenix » uniquement)"
@@ -60,17 +70,15 @@ if [ "$OTHERS_BEFORE" = "$OTHERS_AFTER" ]; then echo "   Autres conteneurs toujo
   echo "   ATTENTION : la liste des autres conteneurs a changé !"; echo "Avant :"; echo "$OTHERS_BEFORE"; echo "Après :"; echo "$OTHERS_AFTER"; fi
 docker ps --format '{{.Names}}\t{{.Status}}' > "/root/fenix-sauvegardes/conteneurs-apres-$STAMP.txt"
 
-if command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
-  echo "   Pare-feu actif : ouvre le port avec  →  ufw allow $PORT/tcp"
-fi
+echo "   Port $PORT lié à 127.0.0.1 et au réseau Docker seulement (pas ouvert sur Internet)."
 
 echo
 echo "================ FENIX EST EN LIGNE ================"
-echo " Site web      : http://$IP:$PORT"
-echo " Commerçants   : http://$IP:$PORT/commercant/"
-echo " Back office   : http://$IP:$PORT/admin/"
-echo " Agences       : http://$IP:$PORT/agence/"
-echo " Appli livreur : http://$IP:$PORT/livreur/  (GPS : seulement après le passage en HTTPS)"
-echo " Admin : $(grep ^ADMIN_PHONE .env | cut -d= -f2)  /  mot de passe : $(cat .admin-password 2>/dev/null || echo 'voir .env')"
+echo " Site web      : $CUR_URL"
+echo " Commerçants   : $CUR_URL/commercant/"
+echo " Back office   : $CUR_URL/admin/"
+echo " Agences       : $CUR_URL/agence/"
+echo " Appli livreur : $CUR_URL/livreur/"
+[ -f .admin-password ] && echo " Mot de passe admin du premier démarrage : dans /opt/fenix/.admin-password (à changer, puis supprimer ce fichier)"
 echo " Arrêter Fenix (sans perdre les données) :  cd /opt/fenix && $COMPOSE down"
 echo "===================================================="

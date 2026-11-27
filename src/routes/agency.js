@@ -2,7 +2,9 @@
 import express from 'express';
 import { db, tx, setting } from '../db.js';
 import { fail, STATUS_LABELS, MOBILE } from '../logic.js';
-import { createShipment, mustGet, depotScan, handOver, agencyReceive, amountDue, confirmPayment } from '../shipments.js';
+import { createShipment, mustGet, depotScan, handOver, agencyReceive, amountDue, confirmPayment, renewOtp } from '../shipments.js';
+import { notifyNewCode } from '../notify.js';
+import { limits } from '../limits.js';
 import { closeCash } from './admin.js';
 
 const r = express.Router();
@@ -35,6 +37,14 @@ r.get('/info', (req, res) => {
 });
 
 r.post('/shipments', async (req, res) => res.status(201).json(await createShipment(req.body, req.user, { agency: req.agency })));
+
+// Nouveau code de livraison (expiré après 24 h ou bloqué après 3 essais) pour un colis qui attend dans cette agence.
+r.post('/shipments/:t/resend-code', limits.resend, async (req, res) => {
+  const s = mustGet(req.params.t);
+  if (s.status !== 'disponible_agence' || s.agency_id !== req.agency.id) fail(403, 'Ce colis n’attend pas dans votre agence');
+  await notifyNewCode(s, renewOtp(s));
+  res.json({ ok: true });
+});
 
 // Paiements à confirmer : réservations en ligne et envois Mobile Money des commerçants.
 r.get('/payments', (_req, res) => res.json(db.prepare(`SELECT id, tracking, sender_name, sender_phone, recipient_name, recipient_phone, from_commune, to_commune, price_fc, cod_amount_fc,

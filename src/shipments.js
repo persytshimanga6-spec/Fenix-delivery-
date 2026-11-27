@@ -1,7 +1,8 @@
 // Opérations sur les colis, partagées par le site, l'appli livreur, l'agence et le back office.
+import crypto from 'node:crypto';
 import { db, tx, setting } from './db.js';
 import {
-  quote, newTracking, newOtp, checkOtp, addEvent, canMove, fail, shelfFor,
+  quote, newTracking, newOtp, checkOtp, OTP_MAX_TRIES, OTP_LOCK_MIN, OTP_TTL_H, addEvent, canMove, fail, shelfFor,
   SIZES, MOBILE, PAY_METHODS, STATUS_LABELS, publicUrl
 } from './logic.js';
 import { normPhone } from './auth.js';
@@ -85,6 +86,8 @@ export async function createShipment(input, actor, ctx = {}) {
     if (!d.from_landmark) d.from_landmark = ctx.agency.name;
     if (d.from_lat == null) { d.from_lat = ctx.agency.lat; d.from_lng = ctx.agency.lng; }
     if (d.pay_method === 'compte' && !d.merchant_id) fail(400, 'Au comptoir : espèces ou Mobile Money');
+    // Un agent ne peut pas facturer un envoi sur le compte d'un commerçant (réservé au bureau).
+    if (d.pay_method === 'compte' && role === 'agent') fail(403, 'Le paiement « sur compte » d’un commerçant se fait seulement au bureau');
     if (d.pay_method === 'compte' && d.cod_amount_fc > 0) fail(400, 'Avec une marchandise, le client paie l’envoi et la marchandise avant le départ');
   } else if (d.pay_method === 'compte' && !d.merchant_id) {
     fail(400, 'Le paiement « sur compte » est réservé aux commerçants');
@@ -103,7 +106,7 @@ export async function createShipment(input, actor, ctx = {}) {
 
   const q = quote(d);
   const tracking = newTracking();
-  const { otp, hash } = newOtp(tracking);
+  const { otp, salt, hash } = newOtp();
   // Le comptoir (ou le siège) encaisse lui-même : payé tout de suite. Ailleurs : en attente de confirmation.
   const payment_status = d.pay_method === 'compte' ? 'compte' : (ctx.agency || role === 'admin') ? 'paye' : 'en_attente';
   const paidNow = payment_status === 'paye';
@@ -112,13 +115,13 @@ export async function createShipment(input, actor, ctx = {}) {
     const r = db.prepare(`INSERT INTO shipments (tracking, merchant_id, agency_id, pickup_agency_id, sender_name, sender_phone,
       from_commune, from_landmark, from_lat, from_lng, recipient_name, recipient_phone, recipient_email, sender_email, to_commune, to_landmark, to_lat, to_lng,
       size, weight_kg, description, declared_value_fc, insured, express, zone, price_fc, pay_method, shipping_paid, cod_amount_fc,
-      status, otp_hash, payment_status, payment_ref, paid_at)
+      status, otp_hash, otp_salt, otp_created_at, payment_status, payment_ref, paid_at)
       VALUES (@tracking, @merchant_id, @agency_id, @pickup_agency_id, @sender_name, @sender_phone, @from_commune, @from_landmark,
       @from_lat, @from_lng, @recipient_name, @recipient_phone, @recipient_email, @sender_email, @to_commune, @to_landmark, @to_lat, @to_lng, @size, @weight_kg,
       @description, @declared_value_fc, @insured, @express, @zone, @price_fc, @pay_method, @shipping_paid, @cod_amount_fc,
-      'cree', @otp_hash, @payment_status, @payment_ref, @paid_at)`).run({
+      'cree', @otp_hash, @otp_salt, @otp_created_at, @payment_status, @payment_ref, @paid_at)`).run({
       ...d, agency_id: d.agency_id ?? null, merchant_id: d.merchant_id ?? null, tracking, zone: q.zone,
-      price_fc: q.price_fc, shipping_paid: paidNow ? 1 : 0, otp_hash: hash,
+      price_fc: q.price_fc, shipping_paid: paidNow ? 1 : 0, otp_hash: hash, otp_salt: salt, otp_created_at: new Date().toISOString(),
       payment_status, paid_at: paidNow ? new Date().toISOString() : null
     });
     const sid = r.lastInsertRowid;
@@ -138,16 +141,16 @@ export async function createShipment(input, actor, ctx = {}) {
   await notifyShipment(db.prepare('SELECT * FROM shipments WHERE id = ?').get(id), 'cree', { otp }).catch((e) => console.error('Notification', e.message));
 
   const out = { ...db.prepare('SELECT * FROM shipments WHERE id = ?').get(id), quote: q, otp_demo: process.env.SHOW_OTP === '1' ? otp : undefined };
-  // Réservation en ligne : le client voit son code tout de suite, pour le donner au destinataire.
-  if (ctx.public) out.otp = otp;
-  delete out.otp_hash;
+  delete out.otp_hash; delete out.otp_salt;
   return out;
 }
 
 // Étapes interdites tant que le port n'est pas payé : le colis ne part pas.
 const NEEDS_PAYMENT = ['ramasse', 'en_agence', 'au_depot', 'en_livraison', 'disponible_agence'];
 
+const PATCHABLE = ['shelf', 'driver_id', 'agency_id', 'delivered_at', 'shipping_paid', 'photo', 'attempts'];
 export function move(s, to, actor, { note = null, lat = null, lng = null, patch = {} } = {}) {
+  for (const k of Object.keys(patch)) if (!PATCHABLE.includes(k)) throw new Error(`Champ non autorisé : ${k}`);
   if (!canMove(s.status, to)) fail(409, `Impossible : le colis est « ${STATUS_LABELS[s.status]} »`);
   if (s.payment_status === 'en_attente' && NEEDS_PAYMENT.includes(to)) fail(402, `Colis ${s.tracking} non payé : le paiement doit être confirmé avant le départ`);
   const sets = Object.keys(patch).map((k) => `${k} = @${k}`);
@@ -231,7 +234,23 @@ export function amountDue(s) {
 
 /** Remise au destinataire : par un livreur (livre) ou au comptoir (retire). */
 export function handOver(s, actor, { otp, method, photo = null, lat = null, lng = null, holder }) {
-  if (!checkOtp(s, otp)) fail(400, 'Code de livraison incorrect');
+  const now = Date.now();
+  if (s.otp_locked_until && Date.parse(s.otp_locked_until) > now) {
+    fail(429, `Trop de codes faux : réessayez dans ${Math.ceil((Date.parse(s.otp_locked_until) - now) / 60000)} min, ou demandez un nouveau code au bureau`);
+  }
+  const born = Date.parse(s.otp_created_at || String(s.created_at).replace(' ', 'T') + 'Z');
+  if (Number.isFinite(born) && now - born > OTP_TTL_H * 3600e3) fail(410, 'Code de livraison expiré : demandez un nouveau code au bureau');
+  if (!checkOtp(s, otp)) {
+    const tries = (s.otp_attempts || 0) + 1;
+    if (tries >= OTP_MAX_TRIES) {
+      db.prepare('UPDATE shipments SET otp_attempts = 0, otp_locked_until = ? WHERE id = ?').run(new Date(now + OTP_LOCK_MIN * 60e3).toISOString(), s.id);
+      addEvent(s.id, s.status, actor?.id, `Code faux ${OTP_MAX_TRIES} fois : bloqué ${OTP_LOCK_MIN} min`);
+      fail(429, `Code faux ${OTP_MAX_TRIES} fois : bloqué ${OTP_LOCK_MIN} minutes`);
+    }
+    db.prepare('UPDATE shipments SET otp_attempts = ? WHERE id = ?').run(tries, s.id);
+    fail(400, `Code de livraison incorrect (${OTP_MAX_TRIES - tries} essai(s) restant(s))`);
+  }
+  if (s.otp_attempts) db.prepare('UPDATE shipments SET otp_attempts = 0 WHERE id = ?').run(s.id);
   const due = amountDue(s);
   if (due.total > 0 && !['cash', ...MOBILE].includes(method)) fail(400, 'Indiquez comment le client a payé');
   const to = holder.type === 'agence' ? 'retire' : 'livre';
@@ -257,20 +276,38 @@ export function failDelivery(s, actor, reason, lat, lng) {
   return move(s, 'echec', actor, { note: reason, lat, lng, patch: { attempts: s.attempts + 1 } });
 }
 
-// Vue publique du suivi : sans téléphone, sans adresse exacte, sans code.
-export function publicTrack(s) {
+/** Preuve de possession : les 4 derniers chiffres du téléphone du destinataire ou de l'expéditeur. */
+export function ownsShipment(s, digits) {
+  const d = String(digits ?? '').replace(/\D/g, '');
+  if (d.length < 4) return false;
+  const last4 = d.slice(-4);
+  const tail = (p) => String(p || '').replace(/\D/g, '').slice(-4);
+  const a = Buffer.from(last4), ok = (p) => { const b = Buffer.from(tail(p)); return b.length === 4 && crypto.timingSafeEqual(a, b); };
+  return ok(s.recipient_phone) | ok(s.sender_phone) ? true : false;
+}
+
+/** Nouveau code de livraison (expiré ou bloqué) : remet les essais à zéro. */
+export function renewOtp(s) {
+  const { otp, salt, hash } = newOtp();
+  db.prepare('UPDATE shipments SET otp_hash = ?, otp_salt = ?, otp_created_at = ?, otp_attempts = 0, otp_locked_until = NULL WHERE id = ?')
+    .run(hash, salt, new Date().toISOString(), s.id);
+  return otp;
+}
+
+// Vue publique du suivi : sans téléphone ni code. Position et adresse seulement avec la preuve (full).
+export function publicTrack(s, { full = false } = {}) {
   const events = db.prepare('SELECT status, note, created_at FROM events WHERE shipment_id = ? ORDER BY id').all(s.id)
     .map((e) => ({ status: e.status, label: STATUS_LABELS[e.status] || e.status, at: e.created_at }));
   let driver = null;
-  if (s.status === 'en_livraison' && s.driver_id) {
+  if (full && s.status === 'en_livraison' && s.driver_id) {
     const u = db.prepare('SELECT name, last_lat, last_lng, last_seen FROM users WHERE id = ?').get(s.driver_id);
     if (u) driver = { name: u.name.split(' ')[0], lat: u.last_lat, lng: u.last_lng, seen: u.last_seen };
   }
   const pickup = s.pickup_agency_id ? db.prepare('SELECT name, address, commune FROM agencies WHERE id = ?').get(s.pickup_agency_id) : null;
   return {
     tracking: s.tracking, status: s.status, label: STATUS_LABELS[s.status], from_commune: s.from_commune, to_commune: s.to_commune,
-    to_lat: s.status === 'en_livraison' ? s.to_lat : null, to_lng: s.status === 'en_livraison' ? s.to_lng : null,
-    sender: s.sender_name, express: !!s.express, due_fc: amountDue(s).total, events, driver, pickup_agency: pickup,
+    to_lat: full && s.status === 'en_livraison' ? s.to_lat : null, to_lng: full && s.status === 'en_livraison' ? s.to_lng : null,
+    verified: full, sender: full ? s.sender_name : undefined, express: !!s.express, due_fc: amountDue(s).total, events, driver, pickup_agency: pickup,
     payment: s.payment_status === 'en_attente' ? 'en_attente' : 'ok', price_fc: s.payment_status === 'en_attente' ? prepayTotal(s) : undefined
   };
 }

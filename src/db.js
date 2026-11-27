@@ -179,6 +179,7 @@ CREATE TABLE IF NOT EXISTS sms_log (
 CREATE_NOTIF();
 
 function addColumn(table, col, def) {
+  if (![table, col].every((x) => /^[A-Za-z0-9_]+$/.test(x))) throw new Error(`Nom de colonne invalide : ${table}.${col}`);
   if (!db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
 }
 function CREATE_NOTIF() {
@@ -201,8 +202,16 @@ addColumn('merchants', 'notify_email', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('shipments', 'recipient_email', 'TEXT');
 // Paiement avant le départ du colis : paye | en_attente | compte (facture hebdomadaire du commerçant).
 addColumn('shipments', 'payment_status', 'TEXT');
+// Code de livraison : sel, date de création, essais ratés et blocage temporaire.
+addColumn('shipments', 'otp_salt', 'TEXT');
+addColumn('shipments', 'otp_created_at', 'TEXT');
+addColumn('shipments', 'otp_attempts', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('shipments', 'otp_locked_until', 'TEXT');
 addColumn('shipments', 'payment_ref', 'TEXT');
 addColumn('shipments', 'paid_at', 'TEXT');
+// Un commerçant ne peut se connecter qu'une fois validé (comptes créés avant cette règle compris).
+db.exec(`UPDATE users SET active = 0 WHERE role = 'commercant' AND active = 1
+  AND merchant_id IN (SELECT id FROM merchants WHERE status != 'actif')`);
 // Anciens réglages du prix par zone et du supplément dynamique : retirés.
 db.exec(`DELETE FROM settings WHERE key IN ('pricing_mode','km_fc','surge_on','busy_score','very_busy_score','busy_pct',
   'very_busy_pct','traffic_hours','traffic_pct','surge_max_pct','cod_fee_pct','driver_share_pct')`);

@@ -13,6 +13,7 @@
   <form id="f" class="row card">
     <label for="n" class="hidden">Numéro de suivi</label>
     <input id="n" placeholder="Numéro de suivi" required style="flex:1;min-width:200px">
+    <input id="p4" placeholder="4 derniers chiffres du téléphone" inputmode="numeric" maxlength="4" pattern="\d{4}" style="width:230px" title="Téléphone du destinataire ou de l'expéditeur : pour voir la carte et le livreur">
     <button class="blue" type="submit">Suivre</button>
   </form>
   <div id="out" class="stack"></div>
@@ -24,14 +25,16 @@ const cfg = await api('/api/config');
 document.querySelectorAll('[data-company]').forEach((e) => (e.textContent = cfg.company));
 const params = new URLSearchParams(location.search);
 let timer, map;
+let digits = sessionStorage.getItem('fx-p4') || '';
 
 async function show(n) {
   clearTimeout(timer);
   try {
-    const t = await api('/api/track/' + encodeURIComponent(n));
+    const t = await api('/api/track/' + encodeURIComponent(n) + (digits ? '?phone=' + encodeURIComponent(digits) : ''));
     const last = t.events.length - 1;
     $('#out').innerHTML = `<div class="card stack">
-      <div class="small muted">N° ${esc(t.tracking)} · de ${esc(t.sender)} (${esc(t.from_commune)}) vers ${esc(t.to_commune)}</div>
+      <div class="small muted">N° ${esc(t.tracking)} · ${t.sender ? `de ${esc(t.sender)} ` : ''}(${esc(t.from_commune)}) vers ${esc(t.to_commune)}</div>
+      ${t.verified ? '' : '<p class="small" style="margin:0;color:#F4B683">Pour voir la carte et le livreur, entrez les 4 derniers chiffres du téléphone du destinataire ou de l’expéditeur.</p>'}
       <h1>${esc(t.label)}</h1>
       ${t.pickup_agency ? `<p style="margin:0">À retirer : <strong>${esc(t.pickup_agency.name)}</strong> · ${esc(t.pickup_agency.address || t.pickup_agency.commune || '')}</p>` : ''}
       ${t.payment === 'en_attente' ? `<p style="margin:0;color:#F4B683">Paiement de l'envoi en attente de confirmation${t.price_fc ? ` (${fc(t.price_fc)})` : ''} : le colis partira dès qu'il est confirmé. <a href="/payer.html?n=${encodeURIComponent(t.tracking)}">Payer ou envoyer la référence</a></p>` : ''}
@@ -52,7 +55,12 @@ async function show(n) {
     $('#out').innerHTML = `<div class="card"><strong>${esc(e.message)}</strong><p class="muted">Vérifiez le numéro reçu par SMS.</p></div>`;
   }
 }
-$('#f').onsubmit = (e) => { e.preventDefault(); const n = $('#n').value.trim().toUpperCase(); history.replaceState(null, '', '?n=' + n); show(n); };
+$('#p4').value = digits;
+$('#f').onsubmit = (e) => {
+  e.preventDefault(); const n = $('#n').value.trim().toUpperCase();
+  digits = $('#p4').value.trim(); try { sessionStorage.setItem('fx-p4', digits); } catch { /* navigation privée */ }
+  history.replaceState(null, '', '?n=' + n); show(n);
+};
 if (params.get('n')) { $('#n').value = params.get('n'); show(params.get('n')); }
 </script>
 </body>

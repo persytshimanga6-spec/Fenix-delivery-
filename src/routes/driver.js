@@ -2,6 +2,8 @@
 import express from 'express';
 import multer from 'multer';
 import path from 'node:path';
+import fs from 'node:fs';
+import { limits } from '../limits.js';
 import crypto from 'node:crypto';
 import { db, dataDir } from '../db.js';
 import { fail, STATUS_LABELS } from '../logic.js';
@@ -14,7 +16,7 @@ const upload = multer({
     filename: (_req, _f, cb) => cb(null, `${Date.now()}-${crypto.randomBytes(6).toString('hex')}.jpg`)
   }),
   limits: { fileSize: 8 * 1024 * 1024 },
-  fileFilter: (_req, f, cb) => cb(null, /^image\//.test(f.mimetype))
+  fileFilter: (_req, f, cb) => cb(null, /^image\/(jpeg|png|webp|heic|heif)$/.test(f.mimetype))
 });
 
 const mine = (req, t) => {
@@ -50,16 +52,34 @@ r.post('/shipments/:t/start', (req, res) => {
   res.json(move(s, 'en_livraison', req.user, pos(req.body)));
 });
 
-// Livraison avec code du destinataire, photo facultative, paiement.
-r.post('/shipments/:t/deliver', upload.single('photo'), (req, res) => {
+// Vérifie le vrai contenu du fichier (pas seulement son type annoncé) : JPEG, PNG, WebP ou HEIC.
+function isImage(file) {
+  const fd = fs.openSync(file, 'r'); const b = Buffer.alloc(12);
+  try { fs.readSync(fd, b, 0, 12, 0); } finally { fs.closeSync(fd); }
+  return (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff)                                   // JPEG
+    || b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) // PNG
+    || (b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP')      // WebP
+    || (b.toString('latin1', 4, 8) === 'ftyp' && /^(heic|heix|mif1|msf1|hevc)$/.test(b.toString('latin1', 8, 12))); // HEIC
+}
+const drop = (f) => { if (f?.path) fs.unlink(f.path, () => {}); };
+
+// Livraison : code du destinataire + photo, tous les deux obligatoires.
+// Les contrôles (tournée, statut) passent AVANT l'envoi de la photo ; la photo est supprimée si la remise échoue.
+r.post('/shipments/:t/deliver', limits.deliver, (req, _res, next) => {
   const s = mine(req, req.params.t);
   if (s.status !== 'en_livraison') fail(409, 'Démarrez d’abord la livraison');
   if (s.pickup_agency_id) fail(409, 'Ce colis doit être déposé à l’agence de retrait');
-  if (!req.file) fail(400, 'Photo du colis remis obligatoire');
-  res.json(handOver(s, req.user, {
-    otp: req.body.otp, method: req.body.method, photo: req.file?.filename || null, ...pos(req.body),
-    holder: { type: 'livreur', id: req.user.id }
-  }));
+  next();
+}, upload.single('photo'), (req, res) => {
+  try {
+    if (!req.file) fail(400, 'Photo du colis remis obligatoire');
+    if (!isImage(req.file.path)) fail(400, 'La photo doit être une image JPEG, PNG, WebP ou HEIC');
+    const s = mine(req, req.params.t);
+    res.json(handOver(s, req.user, {
+      otp: req.body.otp, method: req.body.method, photo: req.file.filename, ...pos(req.body),
+      holder: { type: 'livreur', id: req.user.id }
+    }));
+  } catch (e) { drop(req.file); throw e; }
 });
 
 // Dépôt d'un colis « à retirer » dans son agence.

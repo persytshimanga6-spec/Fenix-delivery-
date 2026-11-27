@@ -1,8 +1,14 @@
 // Écrit capacitor.config.json avec l'adresse du serveur Fenix.
 // FENIX_SERVER=https://fenix.promarketmalchena.com npm run sync
 import { writeFileSync } from 'node:fs';
-const server = (process.env.FENIX_SERVER || 'http://64.23.191.226:8081').replace(/\/+$/, '');
-const http = server.startsWith('http://');
+const server = (process.env.FENIX_SERVER || 'https://fenix.promarketmalchena.com').replace(/\/+$/, '');
+// HTTPS obligatoire (mots de passe, positions, photos). Seule exception : http://localhost pour les essais sur PC.
+const local = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(server);
+if (!server.startsWith('https://') && !local) {
+  console.error(`Refusé : l'appli doit utiliser une adresse HTTPS (reçu : ${server}).`);
+  process.exit(1);
+}
+const http = local;
 const config = {
   appId: 'com.fenixdelivery.livreur',
   appName: 'Fenix Livreur',

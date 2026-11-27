@@ -45,7 +45,7 @@ header.d{padding:calc(14px + var(--sat)) 16px 14px;display:flex;justify-content:
     <label class="f" style="color:#E5D6C2">Prénom<input name="first_name" required autocomplete="given-name"></label>
     <div class="card" style="background:var(--night);padding:10px 12px"><div class="label">Nom complet</div><strong id="fullName">—</strong></div>
     <label class="f" style="color:#E5D6C2">Téléphone (sert à vous connecter)<input name="phone" type="tel" required autocomplete="tel"></label>
-    <label class="f" style="color:#E5D6C2">Mot de passe (6 caractères minimum)<input name="password" type="password" minlength="6" required autocomplete="new-password"></label>
+    <label class="f" style="color:#E5D6C2">Mot de passe (8 caractères minimum)<input name="password" type="password" minlength="8" maxlength="72" required autocomplete="new-password"></label>
     <label class="f" style="color:#E5D6C2">Adresse<input name="address" required autocomplete="street-address" placeholder="Commune, quartier, avenue, numéro"></label>
     <label class="f" style="color:#E5D6C2">Année de naissance<input name="birth_year" type="number" inputmode="numeric" min="1930" required placeholder="Ex. 1998"></label>
     <label class="f" style="color:#E5D6C2">E-mail<input name="email" type="email" required autocomplete="email"></label>
@@ -327,7 +327,8 @@ af.onsubmit = run(async (e) => {
   const r = await api('/api/drivers/apply', { method: 'POST', body: { ...f, ...apply } });
   af.reset(); updateName();
   $('#apply .card').innerHTML = `<h1 style="margin:0">Merci !</h1><p style="margin:0">${esc(r.message)}</p>
-    <button class="primary" onclick="location.hash='';location.reload()">Retour à la connexion</button>`;
+    <button class="primary" id="backLogin">Retour à la connexion</button>`;
+  $('#backLogin').onclick = () => { location.hash = ''; location.reload(); };
 });
 
 $('#out').onclick = logout;

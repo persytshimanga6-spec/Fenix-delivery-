@@ -1,5 +1,6 @@
 # Fenix Delivery sur un serveur partagé (ex. avec ProMarket).
-# Projet, conteneur, réseau et volume à part. Un seul port public : 8081 (modifiable avec FENIX_PORT).
+# Projet, conteneur, réseau et volume à part. Port 8081 (FENIX_PORT) JAMAIS ouvert sur Internet :
+# seulement sur la machine (127.0.0.1, vérification) et sur le réseau Docker (172.17.0.1, pour nginx qui fait le HTTPS).
 # Ne touche à aucun autre conteneur.
 name: fenix
 services:
@@ -9,7 +10,8 @@ services:
     restart: unless-stopped
     env_file: ../.env
     ports:
-      - "${FENIX_PORT:-8081}:3000"
+      - "127.0.0.1:${FENIX_PORT:-8081}:3000"
+      - "${FENIX_DOCKER_HOST_IP:-172.17.0.1}:${FENIX_PORT:-8081}:3000"
     volumes:
       - fenix-data:/data
     mem_limit: 300m

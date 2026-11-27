@@ -43,7 +43,8 @@ const SETTINGS = {
   road_factor: '1.35',        // détour moyen par la route
   // Numéros Mobile Money de l'entreprise, affichés au client pour payer.
   momo_mpesa: '', momo_orange: '', momo_airtel: '',
-  carto_api_key: ''          // clé gratuite du fond de carte CARTO (Tarifs et réglages)
+  carto_api_key: '',         // clé gratuite du fond de carte CARTO (Tarifs et réglages)
+  sms_daily_max: '500', sms_per_number_daily: '8'   // plafonds de SMS par jour
 };
 
 export function ensureBase() {
@@ -59,11 +60,15 @@ export function ensureBase() {
 
     const hasAdmin = db.prepare("SELECT 1 FROM users WHERE role = 'admin'").get();
     if (!hasAdmin) {
+      // Premier démarrage : le mot de passe admin DOIT venir de ADMIN_PASSWORD (jamais de valeur par défaut).
       const phone = process.env.ADMIN_PHONE || '0800000000';
-      const pass = process.env.ADMIN_PASSWORD || 'admin123';
+      const pass = process.env.ADMIN_PASSWORD || '';
+      if (!pass || ['change-moi-tout-de-suite', 'CHANGE-MOI', 'admin123'].includes(pass) && process.env.NODE_ENV !== 'test' || pass.length < 8) {
+        throw new Error('ADMIN_PASSWORD manquant ou trop faible (8 caractères minimum) : impossible de créer le compte administrateur.');
+      }
       db.prepare("INSERT INTO users (role, name, phone, password_hash) VALUES ('admin', 'Administrateur', ?, ?)")
-        .run(phone, bcrypt.hashSync(pass, 10));
-      console.log(`Compte administrateur créé : téléphone ${phone}, mot de passe ${pass} (à changer).`);
+        .run(phone, bcrypt.hashSync(pass, 12));
+      console.log(`Compte administrateur créé : téléphone ${phone} (mot de passe : celui de ADMIN_PASSWORD).`);
     }
   })();
 }
@@ -83,6 +88,8 @@ const PRODUCTS = [
 ];
 
 export function seedDemo() {
+  // Comptes de démonstration (mots de passe connus) : uniquement pour les tests, jamais en production.
+  if (process.env.NODE_ENV !== 'test') { console.warn('SEED_DEMO ignoré : la démo ne se crée qu’avec NODE_ENV=test.'); return; }
   ensureBase();
   if (db.prepare('SELECT 1 FROM agencies').get()) { console.log('Démo déjà présente.'); return; }
   const h = (p) => bcrypt.hashSync(p, 10);

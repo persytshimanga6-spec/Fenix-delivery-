@@ -32,7 +32,8 @@ function client() {
     if (r.status >= 400) throw new Error(`${method} ${url} → ${r.status} ${JSON.stringify(r.data)}`);
     return r.data;
   };
-  return { call, ok, login: (phone, password) => ok('POST', '/api/login', { phone, password }) };
+  return { call, ok, login: (phone, password) => ok('POST', '/api/login', { phone, password }),
+    get cookie() { return cookie; }, set cookie(v) { cookie = v; } };
 }
 
 const admin = client(); const merch = client(); const driver = client(); const driver2 = client();
@@ -54,16 +55,22 @@ try {
   await step('inscription commerçant en attente, puis validation', async () => {
     const bad = await pub.call('POST', '/api/merchants/signup', { name: 'X' });
     assert.equal(bad.status, 400);
-    await pub.ok('POST', '/api/merchants/signup', {
-      name: 'Shop Mode Kin', contact_name: 'Cédric', phone: '0811111111', password: 'secret1', commune: 'Kalamu',
-      landmark: 'Rond-point Victoire', lat: -4.33, lng: 15.31, payout_operator: 'orange', accept: true, email: 'Shop@Exemple.com'
-    });
-    await merch.login('0811111111', 'secret1');
-    const denied = await merch.call('POST', '/api/merchant/shipments', {});
-    assert.equal(denied.status, 403);
+    const form = { name: 'Shop Mode Kin', contact_name: 'Cédric', phone: '0811111111', password: 'secret12', commune: 'Kalamu',
+      landmark: 'Rond-point Victoire', lat: -4.33, lng: 15.31, payout_operator: 'orange', accept: true, email: 'Shop@Exemple.com' };
+    assert.equal((await pub.call('POST', '/api/merchants/signup', { ...form, password: 'court12' })).status, 400); // 8 caractères minimum
+    const first = await pub.ok('POST', '/api/merchants/signup', form);
+    // Même numéro : même réponse (on ne révèle pas qu'un compte existe).
+    const again = await pub.call('POST', '/api/merchants/signup', { ...form, name: 'Autre' });
+    assert.equal(again.status, 201); assert.equal(again.data.message, first.message);
+    // En attente : pas de connexion.
+    const pending = await merch.call('POST', '/api/login', { phone: '0811111111', password: 'secret12' });
+    assert.equal(pending.status, 403);
     const list = await admin.ok('GET', '/api/admin/merchants');
+    assert.equal(list.filter((m) => m.phone === '0811111111').length, 1);
     newMerchantId = list.find((m) => m.name === 'Shop Mode Kin').id;
     await admin.ok('POST', `/api/admin/merchants/${newMerchantId}/status`, { status: 'actif' });
+    const li = await merch.login('0811111111', 'secret12');
+    assert.equal(li.token, undefined); // jeton seulement dans le cookie httpOnly
   });
 
   const order = {
@@ -104,9 +111,11 @@ try {
     assert.equal(s1.price_fc, q1.price_fc);
     assert.equal(s1.payment_status, 'en_attente'); assert.equal(s1.shipping_paid, 0);
     const sms = await admin.ok('GET', '/api/admin/sms');
-    assert.ok(sms.some((m) => m.message.includes(s1.tracking) && m.message.includes(s1.otp_demo)));
+    // Le code est envoyé au client, mais jamais gardé en clair dans le journal.
+    assert.ok(sms.some((m) => m.message.includes(s1.tracking) && m.message.includes('Code de livraison : ••••')));
+    assert.ok(!sms.some((m) => m.message.includes(`livraison : ${s1.otp_demo}`)));
     const n = await admin.ok('GET', '/api/admin/notifications?channel=email');
-    assert.ok(n.some((m) => m.to_addr === 'patrick@exemple.com' && m.message.includes(s1.otp_demo)), 'e-mail client avec code');
+    assert.ok(n.some((m) => m.to_addr === 'patrick@exemple.com' && m.message.includes('••••')), 'e-mail client (code masqué dans le journal)');
     assert.ok(n.some((m) => m.to_addr === 'shop@exemple.com' && m.audience === 'vendeur'), 'e-mail vendeur');
   });
   await step('suivi public sans données privées', async () => {
@@ -158,8 +167,11 @@ try {
     await admin.ok('POST', `/api/admin/shipments/${s1.tracking}/assign`, { driver_id: jk.id });
     await driver.ok('POST', `/api/driver/shipments/${s1.tracking}/start`, {});
     await driver.ok('POST', '/api/driver/location', { lat: -4.35, lng: 15.33 });
-    const t = await pub.ok('GET', `/api/track/${s1.tracking}`);
-    assert.equal(t.driver.name, 'Jonathan');
+    const anon = await pub.ok('GET', `/api/track/${s1.tracking}`);
+    assert.equal(anon.driver, null); assert.equal(anon.to_lat, null); assert.equal(anon.verified, false); // sans preuve : pas de position
+    assert.equal((await pub.ok('GET', `/api/track/${s1.tracking}?phone=1234`)).verified, false);
+    const t = await pub.ok('GET', `/api/track/${s1.tracking}?phone=9999`); // 4 derniers chiffres du destinataire (0899999999)
+    assert.equal(t.driver.name, 'Jonathan'); assert.ok(t.to_lat);
     const photo = (otp) => { const fd = new FormData(); fd.append('otp', otp);
       fd.append('photo', new Blob([Buffer.from([0xff, 0xd8, 0xff, 0xd9])], { type: 'image/jpeg' }), 'colis.jpg'); return fd; };
     const noPhoto = await driver.call('POST', `/api/driver/shipments/${s1.tracking}/deliver`, { otp: s1.otp_demo });
@@ -248,7 +260,7 @@ try {
     assert.equal((await pub.call('POST', '/api/book', { ...book, pay_method: 'compte' })).status, 400);
     assert.equal((await pub.call('POST', '/api/book', { ...book, pay_method: 'orange' })).status, 400); // référence obligatoire
     pubMomo = await pub.ok('POST', '/api/book', { ...book, pay_method: 'orange', payment_ref: 'OM-55443322' });
-    assert.match(pubMomo.tracking, /^FX-/); assert.match(pubMomo.otp, /^\d{4}$/);
+    assert.match(pubMomo.tracking, /^FX-/); assert.equal(pubMomo.otp, undefined); // le code part seulement par SMS au destinataire
     assert.ok(!pubMomo.quote.lines.some((l) => /Carburant|Trafic/.test(l.label)));
     assert.equal(pubMomo.payment_status, 'en_attente');
     assert.equal((await admin.call('POST', `/api/admin/shipments/${pubMomo.tracking}/assign`, { driver_id: gm.id })).status, 402);
@@ -267,7 +279,8 @@ try {
     assert.equal(s5.payment_status, 'en_attente');
     const sms = await admin.ok('GET', '/api/admin/sms');
     assert.ok(sms.some((m) => m.phone === '0899999999' && m.message.includes(`/payer.html?n=${s5.tracking}`)));
-    const info = await pub.ok('GET', `/api/pay/${s5.tracking}`);
+    assert.equal((await pub.call('GET', `/api/pay/${s5.tracking}`)).status, 403); // preuve obligatoire
+    const info = await pub.ok('GET', `/api/pay/${s5.tracking}?phone=9999`);
     assert.equal(info.total_fc, s5.price_fc + 30000); assert.equal(info.goods_fc, 30000);
     assert.equal((await pub.call('POST', `/api/pay/${s5.tracking}`, { phone: '0811111111', pay_method: 'mpesa', payment_ref: 'MP99887766' })).status, 403);
     await pub.ok('POST', `/api/pay/${s5.tracking}`, { phone: '+243 899 999 999', pay_method: 'airtel', payment_ref: 'AM99887766' });
@@ -352,7 +365,7 @@ try {
     assert.equal((await pub.call('POST', '/api/drivers/apply', { ...form, experience_years: 1 })).status, 400); // moins de 2 ans
     assert.equal((await pub.call('POST', '/api/drivers/apply', { ...form, disability: 'oui' })).status, 400); // précision obligatoire
     await pub.ok('POST', '/api/drivers/apply', form);
-    assert.equal((await pub.call('POST', '/api/drivers/apply', form)).status, 409);
+    assert.equal((await pub.call('POST', '/api/drivers/apply', form)).status, 201); // réponse neutre, rien de créé en double
     const pending = client();
     const r = await pending.call('POST', '/api/login', { phone: '0821234567', password: 'route123' });
     assert.equal(r.status, 403); // en attente : pas de connexion
@@ -401,7 +414,20 @@ try {
     await admin.ok('POST', '/api/me/password', { current: 'admin123', password: 'nouveau123' });
     await admin.ok('PATCH', '/api/me', { phone: '0899111222', name: 'Persy' });
     const again = client(); await again.login('0899111222', 'nouveau123');
-    assert.equal((await admin.call('PATCH', '/api/me', { phone: '0820000001' })).status, 409);
+    // Changement de mot de passe : l'ancien est obligatoire et les autres sessions sont coupées.
+    assert.equal((await again.call('POST', '/api/me/password', { password: 'encore1234' })).status, 400);
+    const other = client(); await other.login('0899111222', 'nouveau123');
+    await again.ok('POST', '/api/me/password', { current: 'nouveau123', password: 'encore1234' });
+    assert.equal((await other.call('GET', '/api/me')).status, 401);          // autre session coupée
+    assert.equal((await again.call('GET', '/api/me')).status, 200);          // la session qui a changé reste ouverte
+    assert.equal((await admin.call('GET', '/api/me')).status, 401);
+    await admin.login('0899111222', 'encore1234');
+    // Déconnexion : le jeton est révoqué, même s'il est réutilisé.
+    const saved = again.cookie;
+    await again.ok('POST', '/api/logout', {});
+    again.cookie = saved;
+    assert.equal((await again.call('GET', '/api/me')).status, 401);
+    assert.equal((await admin.call('PATCH', '/api/me', { phone: '0820000001' })).status, 400); // « Numéro indisponible », sans dire pourquoi
   });
   await step('tableau de bord et rapport', async () => {
     const d = await admin.ok('GET', '/api/admin/dashboard');
@@ -415,13 +441,57 @@ try {
   });
   await step('nouvel agent, nouveau point relais, nouvel article', async () => {
     const a = await admin.ok('POST', '/api/admin/agencies', { name: 'Relais Masina', kind: 'relais', commune: 'Masina', commission_pct: 10 });
-    await admin.ok('POST', '/api/admin/users', { role: 'agent', name: 'Ruth', phone: '0835555555', password: 'secret1', agency_id: a.id });
+    await admin.ok('POST', '/api/admin/users', { role: 'agent', name: 'Ruth', phone: '0835555555', password: 'secret12', agency_id: a.id });
     const p = await admin.ok('POST', '/api/admin/products', { name: 'Tampon encreur', category: 'Fournitures', price_fc: 4000 });
     await admin.ok('POST', '/api/admin/stock', { agency_id: a.id, product_id: p.id, delta: 5 });
-    const ruth = client(); await ruth.login('0835555555', 'secret1');
+    const ruth = client(); await ruth.login('0835555555', 'secret12');
     const info = await ruth.ok('GET', '/api/agency/info');
     assert.equal(info.agency.name, 'Relais Masina');
     assert.equal(info.products.find((x) => x.id === p.id).qty, 5);
+  });
+  await step('sécurité : code à 4 chiffres limité, en-têtes, origine, photo, agent sur compte', async () => {
+    // Code faux 3 fois → bloqué 30 min, puis un nouveau code (bureau) débloque.
+    const s6 = await merch.ok('POST', '/api/merchant/shipments', { ...order, cod_amount_fc: 0, pay_method: 'compte', payment_ref: '' });
+    await admin.ok('POST', `/api/admin/shipments/${s6.tracking}/assign`, { driver_id: jk.id });
+    await driver.ok('POST', `/api/driver/shipments/${s6.tracking}/pickup`, {});
+    await agent.ok('POST', '/api/agency/depot-scan', { tracking: s6.tracking });
+    await admin.ok('POST', `/api/admin/shipments/${s6.tracking}/assign`, { driver_id: jk.id });
+    await driver.ok('POST', `/api/driver/shipments/${s6.tracking}/start`, {});
+    const img = (otp, bytes = [0xff, 0xd8, 0xff, 0xd9], type = 'image/jpeg') => { const fd = new FormData(); fd.append('otp', otp);
+      fd.append('photo', new Blob([Buffer.from(bytes)], { type }), 'colis.jpg'); return fd; };
+    const wrong = s6.otp_demo === '0000' ? '1111' : '0000';
+    assert.equal((await driver.call('POST', `/api/driver/shipments/${s6.tracking}/deliver`, img(s6.otp_demo, [0x3c, 0x73, 0x76, 0x67]), true)).status, 400); // pas une image
+    assert.equal((await driver.call('POST', `/api/driver/shipments/${s6.tracking}/deliver`, img(wrong), true)).status, 400);
+    assert.equal((await driver.call('POST', `/api/driver/shipments/${s6.tracking}/deliver`, img(wrong), true)).status, 400);
+    assert.equal((await driver.call('POST', `/api/driver/shipments/${s6.tracking}/deliver`, img(wrong), true)).status, 429); // 3e : bloqué
+    assert.equal((await driver.call('POST', `/api/driver/shipments/${s6.tracking}/deliver`, img(s6.otp_demo), true)).status, 429); // même le bon code
+    await admin.ok('POST', `/api/admin/shipments/${s6.tracking}/resend-code`, {});
+    assert.equal((await driver.call('POST', `/api/driver/shipments/${s6.tracking}/deliver`, img(s6.otp_demo), true)).status, 400); // ancien code invalide
+    const photos = fs.readdirSync(path.join(dir, 'photos')).length;
+    assert.equal((await driver2.call('POST', `/api/driver/shipments/${s6.tracking}/deliver`, img(s6.otp_demo), true)).status, 403); // pas sa tournée
+    assert.equal(fs.readdirSync(path.join(dir, 'photos')).length, photos, 'aucune photo gardée quand la remise échoue');
+    // Les hachages ne sortent jamais dans les réponses.
+    const det = await admin.ok('GET', `/api/admin/shipments/${s6.tracking}`);
+    assert.ok(!JSON.stringify(det).includes('otp_hash') && !JSON.stringify(det).includes('otp_salt'));
+    // En-têtes de sécurité et CSP avec nonce.
+    const page = await fetch(base + '/livreur/');
+    const csp = page.headers.get('content-security-policy');
+    assert.ok(csp.includes("default-src 'self'") && csp.includes("frame-ancestors 'none'") && /'nonce-[^']+'/.test(csp));
+    const nonce = csp.match(/'nonce-([^']+)'/)[1];
+    assert.ok((await page.text()).includes(`<script nonce="${nonce}"`));
+    assert.equal(page.headers.get('x-content-type-options'), 'nosniff');
+    // Requête venant d'un autre site : refusée.
+    const csrf = await fetch(base + '/api/quote', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://pirate.example' },
+      body: JSON.stringify({ from_commune: 'Gombe', to_commune: 'Limete', size: 'petit' }) });
+    assert.equal(csrf.status, 403);
+    // Un agent ne facture pas un envoi sur le compte d'un commerçant.
+    const mid = (await admin.ok('GET', '/api/admin/merchants')).find((m) => m.status === 'actif').id;
+    assert.equal((await agent.call('POST', '/api/agency/shipments', { sender_name: 'X', sender_phone: '0811000000', recipient_name: 'Y',
+      recipient_phone: '0812000000', to_commune: 'Limete', size: 'petit', pay_method: 'compte', merchant_id: mid, pickup_agency_id: relayId })).status, 403);
+    // Bureau : pas de mot de passe d'un autre admin, pas de désactivation du dernier admin.
+    const meAdmin = (await admin.ok('GET', '/api/me')).user;
+    assert.equal((await admin.call('PATCH', `/api/admin/users/${meAdmin.id}`, { active: false })).status, 400);
+    assert.equal((await admin.call('POST', '/api/admin/stock', { agency_id: 99999, product_id: 1, delta: 1 })).status, 400);
   });
   await step('pages web servies', async () => {
     for (const p of ['/', '/suivi', '/commercant/', '/livreur/', '/admin/', '/agence/', '/vendor/leaflet/leaflet.js']) {

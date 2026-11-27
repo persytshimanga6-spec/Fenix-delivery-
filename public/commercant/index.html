@@ -31,7 +31,7 @@
   <label class="f">Nom du responsable<input name="contact_name" required></label>
   <label class="f">Téléphone (WhatsApp)<input name="phone" type="tel" required></label>
   <label class="f">E-mail (pour recevoir les notifications)<input name="email" type="email" placeholder="boutique@exemple.com"></label>
-  <label class="f">Mot de passe (6 caractères minimum)<input name="password" type="password" minlength="6" required></label>
+  <label class="f">Mot de passe (8 caractères minimum)<input name="password" type="password" minlength="8" maxlength="72" required></label>
   <div class="label">Type d'activité</div><div class="pills" id="kind"></div>
   <div class="label">Lieu de ramassage</div>
   <button type="button" class="blue" id="sLocate">Utiliser ma position GPS</button>
@@ -161,9 +161,9 @@ $('#signupForm').onsubmit = run(async (e) => {
   e.preventDefault();
   const f = Object.fromEntries(new FormData(e.target));
   const r = await api('/api/merchants/signup', { method: 'POST', body: { ...f, ...signup, accept: !!f.accept } });
-  toast(r.message);
-  await api('/api/login', { method: 'POST', body: { phone: f.phone, password: f.password } });
-  location.hash = '#envois'; location.reload();
+  // Le compte s'ouvre après la validation par le bureau : pas de connexion tout de suite.
+  e.target.closest('.card').innerHTML = `<h1 style="margin:0">Merci !</h1><p style="margin:0">${esc(r.message)}</p>
+    <p class="small muted" style="margin:0">Vous pourrez vous connecter dès que votre compte est validé.</p>`;
 });
 
 // ---------- Espace connecté ----------

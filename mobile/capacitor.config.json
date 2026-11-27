@@ -3,12 +3,12 @@
   "appName": "Fenix Livreur",
   "webDir": "www",
   "server": {
-    "url": "http://64.23.191.226:8081/livreur/",
-    "cleartext": true,
+    "url": "https://fenix.promarketmalchena.com/livreur/",
+    "cleartext": false,
     "errorPath": "offline.html"
   },
   "android": {
-    "allowMixedContent": true
+    "allowMixedContent": false
   },
   "plugins": {
     "SystemBars": {

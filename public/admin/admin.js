@@ -125,7 +125,7 @@ const pages = {
         <div class="grid" style="align-items:end">
           <label class="f">Rôle<select name="role" id="addRole"><option value="livreur">Livreur</option><option value="agent">Agent d'agence</option><option value="admin">Administrateur</option></select></label>
           <label class="f">Téléphone<input name="phone" type="tel" required></label>
-          <label class="f">Mot de passe<input name="password" minlength="6" required></label>
+          <label class="f">Mot de passe<input name="password" minlength="8" maxlength="72" required></label>
           <label class="f staff">Nom<input name="name"></label>
           <label class="f staff">Agence (agent)<select name="agency_id"><option value="">—</option>${agencies.map((a) => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select></label>
         </div>
@@ -179,7 +179,7 @@ const pages = {
       if (t) { await api(`/api/admin/users/${t.dataset.toggle}`, { method: 'PATCH', body: { active: t.dataset.active !== '1' } }); return pages.equipe(); }
       const p = e.target.closest('[data-pass]');
       if (p) {
-        const pw = prompt('Nouveau mot de passe (6 caractères minimum)'); if (!pw) return;
+        const pw = prompt('Nouveau mot de passe (8 caractères minimum)'); if (!pw) return;
         await api(`/api/admin/users/${p.dataset.pass}`, { method: 'PATCH', body: { password: pw } }); toast('Mot de passe changé');
       }
     });
@@ -416,8 +416,8 @@ const pages = {
         <button class="primary">Enregistrer</button></form>
       <form id="mePass" class="card stack"><div class="label">Changer le mot de passe</div>
         <label class="f">Mot de passe actuel<input name="current" type="password" required autocomplete="current-password"></label>
-        <label class="f">Nouveau mot de passe (6 caractères minimum)<input name="password" type="password" minlength="6" required autocomplete="new-password"></label>
-        <label class="f">Répéter le nouveau mot de passe<input name="again" type="password" minlength="6" required autocomplete="new-password"></label>
+        <label class="f">Nouveau mot de passe (8 caractères minimum)<input name="password" type="password" minlength="8" maxlength="72" required autocomplete="new-password"></label>
+        <label class="f">Répéter le nouveau mot de passe<input name="again" type="password" minlength="8" maxlength="72" required autocomplete="new-password"></label>
         <button class="primary">Changer le mot de passe</button></form></div>`;
     $('#meInfo').onsubmit = run(async (e) => {
       e.preventDefault(); const f = new FormData(e.target);

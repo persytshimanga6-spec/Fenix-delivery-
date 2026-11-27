@@ -62,12 +62,22 @@ export function newTracking() {
   }
 }
 
-const otpHash = (tracking, otp) => crypto.createHash('sha256').update(`${tracking}:${otp}`).digest('hex');
-export function newOtp(tracking) {
+// Code de livraison à 4 chiffres : haché avec scrypt et un sel propre à chaque colis (jamais gardé en clair).
+export const OTP_MAX_TRIES = 3, OTP_LOCK_MIN = 30, OTP_TTL_H = 24;
+const scrypt = (otp, salt) => crypto.scryptSync(String(otp), Buffer.from(salt, 'hex'), 32);
+const legacyHash = (tracking, otp) => crypto.createHash('sha256').update(`${tracking}:${otp}`).digest();
+export function newOtp() {
   const otp = String(crypto.randomInt(0, 10000)).padStart(4, '0');
-  return { otp, hash: otpHash(tracking, otp) };
+  const salt = crypto.randomBytes(16).toString('hex');
+  return { otp, salt, hash: scrypt(otp, salt).toString('hex') };
 }
-export const checkOtp = (s, otp) => !!s.otp_hash && otpHash(s.tracking, String(otp || '').trim()) === s.otp_hash;
+export function checkOtp(s, otp) {
+  const code = String(otp ?? '').trim();
+  if (!s.otp_hash || !/^\d{4}$/.test(code)) return false;
+  const expected = Buffer.from(s.otp_hash, 'hex');
+  const got = s.otp_salt ? scrypt(code, s.otp_salt) : legacyHash(s.tracking, code); // anciens colis : ancien hachage
+  return got.length === expected.length && crypto.timingSafeEqual(got, expected);
+}
 
 // SMS et e-mails : voir notify.js.
 export { sendSms } from './notify.js';

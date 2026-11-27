@@ -1,10 +1,11 @@
 // Back office (administrateur) : tout voir et tout régler.
 import express from 'express';
 import { db, tx, setting } from '../db.js';
-import { fail, STATUS_LABELS, today, newOtp } from '../logic.js';
+import { fail, STATUS_LABELS, today } from '../logic.js';
+import { limits } from '../limits.js';
 import { notifyNewCode, notifyMerchant } from '../notify.js';
-import { hash, normPhone } from '../auth.js';
-import { createShipment, mustGet, move, depotScan, amountDue, confirmPayment } from '../shipments.js';
+import { hash, normPhone, checkPassword, revokeAllFor } from '../auth.js';
+import { createShipment, mustGet, move, depotScan, amountDue, confirmPayment, renewOtp } from '../shipments.js';
 import { createDriver, decide } from '../drivers.js';
 
 const r = express.Router();
@@ -81,11 +82,11 @@ r.post('/shipments/:t/status', (req, res) => {
   res.json(move(s, req.body.status, req.user, { note: req.body.note || 'Changement manuel' }));
 });
 
-r.post('/shipments/:t/resend-code', async (req, res) => {
+r.post('/shipments/:t/resend-code', limits.resend, async (req, res) => {
   const s = mustGet(req.params.t);
-  // On ne connaît pas le code (il est chiffré) : on en crée un nouveau.
-  const { otp, hash: h } = newOtp(s.tracking);
-  db.prepare('UPDATE shipments SET otp_hash = ? WHERE id = ?').run(h, s.id);
+  if (['livre', 'retire', 'annule'].includes(s.status)) fail(409, 'Colis déjà remis ou annulé');
+  // On ne connaît pas le code (il est chiffré) : on en crée un nouveau, valable 24 h.
+  const otp = renewOtp(s);
   await notifyNewCode(s, otp);
   res.json({ ok: true });
 });
@@ -105,28 +106,36 @@ r.get('/applications', (req, res) => {
     WHERE p.status = ? ORDER BY p.created_at`).all(st));
 });
 r.post('/applications/:id', (req, res) => res.json(decide(Number(req.params.id), req.body.decision, req.user.id, req.body.zone)));
-r.post('/users', (req, res) => {
+r.post('/users', async (req, res) => {
   const { role, name, phone, password, agency_id, zone } = req.body;
   if (!['livreur', 'agent', 'admin'].includes(role)) fail(400, 'Rôle invalide');
   // Livreur ajouté par le bureau : mêmes champs que la candidature, validé tout de suite.
-  if (role === 'livreur') return res.status(201).json({ id: createDriver(req.body, { validated: true, by: req.user.id, zone }) });
-  if (!name || !phone || !password || String(password).length < 6) fail(400, 'Nom, téléphone et mot de passe (6 caractères) obligatoires');
+  if (role === 'livreur') return res.status(201).json({ id: await createDriver(req.body, { validated: true, by: req.user.id, zone }) });
+  if (!name || !phone) fail(400, 'Nom et téléphone obligatoires');
+  checkPassword(password);
   if (role === 'agent' && !agency_id) fail(400, 'Choisissez l’agence de l’agent');
   if (db.prepare('SELECT 1 FROM users WHERE phone = ?').get(normPhone(phone))) fail(409, 'Ce numéro a déjà un compte');
   const id = db.prepare('INSERT INTO users (role, name, phone, password_hash, agency_id, zone) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(role, String(name).trim(), normPhone(phone), hash(password), role === 'agent' ? agency_id : null, zone || null).lastInsertRowid;
+    .run(role, String(name).trim(), normPhone(phone), await hash(password), role === 'agent' ? agency_id : null, zone || null).lastInsertRowid;
   res.status(201).json({ id });
 });
-r.patch('/users/:id', (req, res) => {
+r.patch('/users/:id', async (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id) || fail(404, 'Introuvable');
   if (u.id === req.user.id && req.body.active === false) fail(400, 'Vous ne pouvez pas désactiver votre propre compte');
+  if (u.role === 'admin' && u.id !== req.user.id && req.body.password) fail(403, 'Le mot de passe d’un autre administrateur se change seulement par lui-même');
+  if (u.role === 'admin' && req.body.active === false
+      && db.prepare("SELECT COUNT(*) n FROM users WHERE role = 'admin' AND active = 1 AND id != ?").get(u.id).n === 0) fail(400, 'Impossible de désactiver le dernier administrateur');
   if (req.body.active && db.prepare("SELECT 1 FROM driver_profiles WHERE user_id = ? AND status != 'valide'").get(u.id)) fail(409, 'Validez d’abord la candidature de ce livreur');
   if ('active' in req.body) db.prepare('UPDATE users SET active = ? WHERE id = ?').run(req.body.active ? 1 : 0, u.id);
   if ('driver_kind' in req.body) {
     if (!['salarie', 'independant'].includes(req.body.driver_kind)) fail(400, 'Type de chauffeur : salarié ou indépendant');
     db.prepare('UPDATE users SET driver_kind = ? WHERE id = ?').run(req.body.driver_kind, u.id);
   }
-  if (req.body.password) db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash(req.body.password), u.id);
+  if (req.body.password) {
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(await hash(checkPassword(req.body.password)), u.id);
+    revokeAllFor(u.id);
+  }
+  if (req.body.active === false) revokeAllFor(u.id);
   if ('zone' in req.body) db.prepare('UPDATE users SET zone = ? WHERE id = ?').run(req.body.zone || null, u.id);
   res.json({ ok: true });
 });
@@ -139,6 +148,9 @@ r.post('/merchants/:id/status', async (req, res) => {
   const m = db.prepare('SELECT * FROM merchants WHERE id = ?').get(req.params.id) || fail(404, 'Introuvable');
   if (!['actif', 'suspendu', 'en_attente'].includes(req.body.status)) fail(400, 'Statut invalide');
   db.prepare('UPDATE merchants SET status = ? WHERE id = ?').run(req.body.status, m.id);
+  // Le compte de connexion du commerçant n'est actif que s'il est validé.
+  db.prepare("UPDATE users SET active = ? WHERE merchant_id = ? AND role = 'commercant'").run(req.body.status === 'actif' ? 1 : 0, m.id);
+  if (req.body.status !== 'actif') db.prepare("SELECT id FROM users WHERE merchant_id = ?").all(m.id).forEach((u) => revokeAllFor(u.id));
   if (req.body.status === 'actif' && m.status !== 'actif') {
     await notifyMerchant(m, 'Votre compte commerçant est validé', 'Votre compte commerçant est validé. Vous pouvez créer vos envois.');
   }
@@ -220,6 +232,9 @@ r.patch('/products/:id', (req, res) => {
 // Réception de marchandise dans une agence (+) ou correction (-).
 r.post('/stock', (req, res) => {
   const { agency_id, product_id, delta } = req.body;
+  if (!db.prepare('SELECT 1 FROM agencies WHERE id = ?').get(agency_id)) fail(400, 'Agence inconnue');
+  if (!db.prepare('SELECT 1 FROM products WHERE id = ?').get(product_id)) fail(400, 'Article inconnu');
+  if (!Number.isInteger(Number(delta)) || Math.abs(Number(delta)) > 100000) fail(400, 'Quantité invalide');
   db.prepare(`INSERT INTO stock (agency_id, product_id, qty) VALUES (?, ?, ?)
     ON CONFLICT(agency_id, product_id) DO UPDATE SET qty = qty + excluded.qty`).run(agency_id, product_id, int(delta));
   res.json(db.prepare('SELECT * FROM stock WHERE agency_id = ? AND product_id = ?').get(agency_id, product_id));

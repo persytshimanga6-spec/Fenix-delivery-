@@ -18,18 +18,31 @@ if (process.env.SMTP_HOST) {
   });
 }
 
+// Le code de livraison n'est JAMAIS gardé en clair (journal, base) : seul le SMS envoyé le contient.
+export const maskCodes = (t) => String(t ?? '').replace(/(code de livraison[^:\n]*:\s*)\d{4}/gi, '$1••••');
+
 function record(channel, to, subject, message, meta, status, error = null) {
+  message = maskCodes(message);
   return db.prepare(`INSERT INTO notifications (channel, to_addr, subject, message, shipment_id, merchant_id, audience, status, error)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(channel, to, subject, message, meta.shipment_id ?? null, meta.merchant_id ?? null,
     meta.audience ?? null, status, error).lastInsertRowid;
 }
 const setStatus = (id, status, error = null) => db.prepare('UPDATE notifications SET status = ?, error = ? WHERE id = ?').run(status, error, id);
 
+// Plafonds de SMS (contre l'envoi massif vers des numéros inconnus) : par numéro et pour toute l'entreprise, par jour.
+function smsAllowed(phone) {
+  const perNumber = Number(setting('sms_per_number_daily', 8)), perDay = Number(setting('sms_daily_max', 500));
+  const today = db.prepare("SELECT COUNT(*) n FROM notifications WHERE channel = 'sms' AND status != 'bloque' AND created_at >= date('now')");
+  const mine = db.prepare("SELECT COUNT(*) n FROM notifications WHERE channel = 'sms' AND status != 'bloque' AND to_addr = ? AND created_at >= date('now')");
+  return today.get().n < perDay && mine.get(phone).n < perNumber;
+}
+
 export async function sendSms(phone, message, meta = {}) {
   if (!phone) return;
+  if (!smsAllowed(phone)) { record('sms', phone, null, message, meta, 'bloque', 'Plafond de SMS du jour atteint'); return; }
   const url = process.env.SMS_WEBHOOK_URL;
   const id = record('sms', phone, null, message, meta, url ? 'envoi' : 'enregistre');
-  if (!url) { if (process.env.NODE_ENV !== 'test') console.log(`[SMS] ${phone} : ${message}`); return; }
+  if (!url) { if (process.env.NODE_ENV !== 'test') console.log(`[SMS] ${phone} : ${maskCodes(message)}`); return; }
   try {
     const r = await fetch(url, {
       method: 'POST',

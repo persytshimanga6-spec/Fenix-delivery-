@@ -35,7 +35,7 @@ Pour arrêter : `docker compose down`. Les données restent gardées (volume `ki
 ## 2. Comptes
 
 - **Administrateur** : le téléphone et le mot de passe de ton fichier `.env` (par défaut `0800000000`).
-- **Comptes de démonstration** (si `SEED_DEMO=1`), mot de passe `demo123` :
+- **Comptes de démonstration** (seulement pour les tests : `SEED_DEMO=1` **et** `NODE_ENV=test`), mot de passe `demo123` :
   - Commerçant : `0810000001`
   - Livreurs : `0820000001`, `0820000002`
   - Agents : `0830000001` (Agence Gombe, dépôt central), `0830000002` (Relais Limete)
@@ -121,8 +121,22 @@ L'appli mobile est **la même appli livreur** que `/livreur/`, mise dans une vra
 - **Construction automatique** : à chaque changement de `mobile/` ou de `public/livreur/`, GitHub construit l'APK (onglet *Actions*) et le publie dans *Releases*.
 - **Lien à envoyer aux livreurs (WhatsApp)** : `https://github.com/persytshimanga6-spec/Fenix-delivery-/releases/latest/download/fenix-livreur.apk`
 - **Changer l'adresse du serveur** (par exemple pour passer en HTTPS) : *Actions › Appli Android Fenix Livreur › Run workflow*, puis mettre l'adresse. On peut aussi créer la variable `FENIX_SERVER` dans *Settings › Secrets and variables › Actions › Variables*.
-- **Signature** : pour les tests, l'APK est signé avec la clé de test du dépôt (`mobile/android/fenix-test.keystore`). Avant le Play Store, il faut créer une vraie clé et la mettre dans les secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` et `ANDROID_KEY_PASSWORD`.
+- **Signature** : la clé n'est **jamais** dans le dépôt. Elle est dans les secrets GitHub `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` et `ANDROID_KEY_PASSWORD` (voir `mobile/README.md`). Sans eux, le build s'arrête.
+- **Adresse** : HTTPS obligatoire (`https://fenix.promarketmalchena.com` par défaut).
 - **Sur un PC, à la main** : `cd mobile && npm ci && FENIX_SERVER=http://… npm run sync && cd android && ./gradlew assembleRelease`. Il faut Android Studio ou le SDK Android, et Java 21.
+
+## 5 quater. Sécurité
+
+- **Connexion** : 5 essais par 15 minutes (par IP + téléphone), puis 15 par heure. Les mots de passe font 8 à 72 caractères (bcrypt, coût 12).
+- **Session** : un jeton de 2 h, dans un cookie httpOnly `sameSite=strict`, renouvelé tant que la personne utilise l'appli. Il est révoqué à la déconnexion. Changer de mot de passe coupe toutes les autres sessions et demande l'ancien mot de passe.
+- **Code de livraison** : haché avec scrypt et un sel par colis. 3 codes faux bloquent le colis 30 minutes. Le code expire après 24 h ; un nouveau se demande au bureau ou à l'agence de retrait. Il n'est jamais gardé en clair : le journal affiche « •••• ».
+- **Suivi et paiement publics** : sans les 4 derniers chiffres du téléphone du destinataire ou de l'expéditeur, on voit seulement l'état du colis (pas de carte ni de livreur).
+- **Inscriptions** : la réponse est la même quand un numéro a déjà un compte. Un commerçant ne peut se connecter qu'après sa validation.
+- **En-têtes** : CSP stricte avec nonce, `frame-ancestors 'none'`, HSTS quand `COOKIE_SECURE=1`. Une requête venue d'un autre site est refusée.
+- **Photos de livraison** : la tournée est vérifiée avant l'envoi. Le contenu doit être une vraie image (JPEG, PNG, WebP ou HEIC), et la photo est supprimée si la remise échoue.
+- **SMS** : 8 par numéro et 500 par jour au maximum (réglages `sms_per_number_daily` et `sms_daily_max`).
+- **Serveur partagé** : le port 8081 n'est lié qu'à `127.0.0.1` et `172.17.0.1` (nginx). Il n'est jamais ouvert sur Internet.
+- **Premier démarrage** : `ADMIN_PASSWORD` est obligatoire (8 caractères minimum). Il n'y a pas de mot de passe par défaut.
 
 ## 6. Notifications automatiques (SMS + e-mail)
 

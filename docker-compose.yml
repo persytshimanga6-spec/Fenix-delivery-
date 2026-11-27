@@ -1,0 +1,13 @@
+services:
+  fenix-delivery:
+    build: .
+    container_name: fenix-delivery
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file: .env
+    volumes:
+      - kincolis-data:/data
+
+volumes:
+  kincolis-data:

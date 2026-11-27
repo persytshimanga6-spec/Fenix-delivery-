@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fenix Delivery – Livraison de colis à Kinshasa</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <span class="brand" style="font-size:22px"><span>Fenix<em>Delivery</em></span></span>
+  <nav><a href="/suivi">Suivre un colis</a><a href="/commercant/">Espace commerçant</a></nav>
+</div></header>
+
+<main class="wrap stack" style="gap:20px">
+  <section class="hero">
+    <img src="/assets/hero.jpg" alt="Un livreur Fenix Delivery à scooter dans une rue de Kinshasa, devant un marché, sous un phénix en flammes">
+    <div class="panel">
+    <div class="eyebrow">Livraison de colis — Kinshasa, RDC</div>
+    <h1>Vos colis livrés <span class="accent">partout</span> à Kinshasa.</h1>
+    <p>Suivi à chaque étape, code de livraison, paiement à la livraison et argent reversé sous 48 h aux commerçants.</p>
+    <form id="track" class="row">
+      <label for="n" class="hidden">Numéro de suivi</label>
+      <input id="n" name="n" placeholder="Numéro de suivi, ex. KIN-1124-000123" required style="flex:1;min-width:220px">
+      <button class="primary" type="submit">Suivre</button>
+    </form>
+    <div class="row" style="gap:8px"><span class="chip"><b>24</b> communes</span><span class="chip">Code de livraison <b>par SMS</b></span></div>
+    </div>
+  </section>
+
+  <section class="grid2">
+    <div class="card stack">
+      <h2>Combien coûte un envoi ?</h2>
+      <div class="grid">
+        <label class="f">Départ<select id="qFrom"></select></label>
+        <label class="f">Arrivée<select id="qTo"></select></label>
+      </div>
+      <div class="pills" id="qSize"></div>
+      <label class="row small"><input type="checkbox" id="qExpress"> Express (moins de 2 h)</label>
+      <div class="spread"><span class="muted">Prix</span><strong id="qPrice" style="font-size:22px">—</strong></div>
+      <div class="small muted" id="qInfo"></div>
+    </div>
+    <div class="card stack">
+      <h2>Nos agences et points relais</h2>
+      <p class="muted small" style="margin:0">Déposez ou retirez vos colis. En agence : emballage, impression, photocopies, photos passeport, ordinateurs, boîtes postales.</p>
+      <ul id="agencies" class="stack" style="padding-left:18px;margin:0"></ul>
+    </div>
+  </section>
+
+  <section class="card spread">
+    <div><h2>Vous vendez en ligne ou en boutique ?</h2><p class="muted" style="margin:0">Ramassage chaque jour, paiement à la livraison, reversement rapide par Mobile Money.</p></div>
+    <a class="btn primary" href="/commercant/#inscription">Devenir commerçant partenaire</a>
+  </section>
+</main>
+
+<script type="module">
+import { $, api, esc, fc, pills, fillCommunes, run } from '/assets/app.js';
+const cfg = await api('/api/config');
+document.querySelectorAll('[data-company]').forEach((e) => (e.textContent = cfg.company));
+document.title = `${cfg.company} – Livraison de colis à Kinshasa`;
+$('#track').onsubmit = (e) => { e.preventDefault(); location.href = '/suivi?n=' + encodeURIComponent($('#n').value.trim()); };
+
+fillCommunes($('#qFrom'), cfg.communes, 'Commune de départ');
+fillCommunes($('#qTo'), cfg.communes, 'Commune d’arrivée');
+let size = 'petit';
+const update = run(async () => {
+  if (!$('#qFrom').value || !$('#qTo').value) return ($('#qPrice').textContent = '—');
+  const q = await api('/api/quote', { method: 'POST', body: { from_commune: $('#qFrom').value, to_commune: $('#qTo').value, size, express: $('#qExpress').checked } });
+  $('#qPrice').textContent = fc(q.price_fc);
+  $('#qInfo').innerHTML = [q.distance_km != null ? `Environ ${q.distance_km.toLocaleString('fr-FR')} km` : '',
+    q.surge?.pct ? `<span class="surge">Forte demande +${q.surge.pct} %</span>` : ''].filter(Boolean).join(' · ');
+});
+pills($('#qSize'), [['petit', 'Petit'], ['moyen', 'Moyen'], ['grand', 'Grand']], size, (v) => { size = v; update(); });
+['#qFrom', '#qTo', '#qExpress'].forEach((s) => ($(s).onchange = update));
+
+$('#agencies').innerHTML = cfg.agencies.map((a) => `<li><strong>${esc(a.name)}</strong> <span class="muted small">· ${esc(a.kind === 'relais' ? 'point relais' : a.kind)} · ${esc(a.commune || '')} ${esc(a.address || '')}</span></li>`).join('')
+  || '<li class="muted">Bientôt disponible</li>';
+</script>
+</body>
+</html>

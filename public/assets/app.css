@@ -1,0 +1,99 @@
+@import url("https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+:root{
+  /* Fenix Delivery : fond brun-noir, texte crème, orange vif */
+  --blue:#16100A;--blue-dark:#110B06;--blue-soft:#2A1D11;--orange:#F0905A;--orange-light:#F4B683;--orange-soft:#281D12;--copper:#F4B683;
+  --ink:#F5EDE2;--ink2:#E5D6C2;--muted:#A89A88;--line:#3A2B1D;--bg:#110B06;--white:#1A120B;--field:#1E150D;
+  --ok:#86E0A6;--ok-bg:#16301F;--warn:#F4B683;--warn-bg:#3A2412;--bad:#F5A3A3;--bad-bg:#3A1616;
+  --night:#110B06;--night2:#1A120B;--night3:#2A1D11;
+  --display:"Archivo",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{font-family:"Archivo",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink2);background:var(--bg);font-size:15px;line-height:1.5}
+a{color:var(--copper)}a:hover{color:var(--blue)}
+h1,h2,h3{margin:0 0 .4em;line-height:1.1;color:var(--ink);font-family:var(--display);font-weight:800;letter-spacing:-.025em}h1{font-size:28px}h2{font-size:19px}h3{font-size:15px}
+strong,b{color:var(--ink)}
+.accent{color:var(--orange)}
+.brand{font-family:var(--display);font-weight:800;letter-spacing:-.02em;color:var(--ink);display:inline-flex;align-items:center;gap:.45em}
+.brand em{font-style:normal;color:var(--orange)}
+.brand::before{content:"";width:1.5em;height:1.5em;flex-shrink:0;background:url(/assets/phoenix.svg) no-repeat center/contain}
+.wrap{max-width:1180px;margin:0 auto;padding:20px}
+.narrow{max-width:520px;margin:0 auto;padding:16px}
+.top{background:var(--blue);color:var(--ink);border-bottom:1px solid var(--line)}
+.top .wrap{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-top:14px;padding-bottom:14px}
+.top a{color:var(--ink2);text-decoration:none;font-weight:600}.top a:hover{color:var(--orange)}
+.top nav{display:flex;gap:16px;flex-wrap:wrap}
+.card{background:var(--white);border:1px solid var(--line);border-radius:14px;padding:16px}
+.stack{display:flex;flex-direction:column;gap:12px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+.grid2{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.spread{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.muted{color:var(--muted)}.small{font-size:13px}.tiny{font-size:12px}
+.label{font-family:var(--mono);font-size:11px;color:var(--orange);font-weight:500;text-transform:uppercase;letter-spacing:.18em}
+.kpi .v{font-family:var(--display);font-size:28px;font-weight:800;color:var(--ink);letter-spacing:-.02em}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;font-weight:500;color:var(--ink2)}
+input,select,textarea{font:inherit;font-size:15px;height:44px;border:1px solid var(--line);border-radius:10px;padding:0 12px;background:var(--field);color:var(--ink);width:100%}
+input::placeholder,textarea::placeholder{color:#8C7F6E}
+select option{background:var(--field);color:var(--ink)}
+textarea{height:auto;min-height:80px;padding:10px 12px}
+input[type=checkbox],input[type=radio]{width:20px;height:20px}
+input:focus,select:focus,textarea:focus,button:focus-visible,a:focus-visible{outline:3px solid var(--orange);outline-offset:1px}
+button,.btn{font:inherit;font-weight:600;font-size:14px;height:44px;padding:0 16px;border-radius:10px;border:1px solid var(--line);background:var(--orange-soft);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none}
+button.primary,.btn.primary{background:var(--orange);border-color:var(--orange);color:var(--blue-dark)}
+button.blue,.btn.blue{background:var(--orange-soft);border-color:var(--orange);color:var(--ink)}
+button.ghost{background:transparent}
+button.danger{border-color:#7A3030;color:var(--bad)}
+button.big{height:54px;font-size:16px;border-radius:14px;width:100%}
+button:disabled{opacity:.55;cursor:not-allowed}
+.pills{display:flex;flex-wrap:wrap;gap:8px}
+.pill{height:40px;padding:0 16px;border-radius:999px;border:1px solid #53412D;background:var(--orange-soft);color:var(--ink2);font-family:var(--mono);font-weight:500;font-size:13px}
+.pill[aria-pressed=true]{border:2px solid var(--orange);background:var(--blue-soft)}
+.badge{display:inline-block;padding:3px 10px;border-radius:999px;font-family:var(--mono);font-size:12px;font-weight:500;white-space:nowrap;background:var(--orange-soft);color:var(--orange-light);border:1px solid #53412D}
+.b-livre,.b-retire,.b-actif,.b-reverse{background:var(--ok-bg);color:var(--ok)}
+.b-en_livraison,.b-en_attente,.b-a_reverser,.b-disponible_agence{background:var(--warn-bg);color:var(--warn)}
+.b-echec,.b-annule,.b-suspendu,.b-retour{background:var(--bad-bg);color:var(--bad)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;color:var(--orange);font-family:var(--mono);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.12em;padding:10px 8px;border-bottom:1px solid var(--line)}
+td{padding:10px 8px;border-bottom:1px solid #241A10;vertical-align:middle}
+.scroll{overflow-x:auto}
+.map{height:260px;border-radius:12px;border:1px solid var(--line);z-index:0}
+.map.tall{height:420px}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--orange);color:var(--blue-dark);padding:12px 18px;border-radius:12px;z-index:9999;max-width:92vw;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.2)}
+.toast.err{background:#F5A3A3;color:#2A0A0A}
+.otp{font-size:30px;font-weight:800;letter-spacing:.2em}
+.hidden{display:none!important}
+.timeline{list-style:none;padding:0;margin:0}
+.timeline li{display:flex;gap:12px;padding-bottom:14px;position:relative}
+.timeline li:before{content:"";width:12px;height:12px;border-radius:50%;background:#53412D;margin-top:4px;flex-shrink:0}
+.timeline li.now:before{background:var(--orange);box-shadow:0 0 0 4px #3A2412}
+.sidebar-layout{display:flex;flex-wrap:wrap;min-height:100vh}
+.sidebar{flex:1 1 220px;max-width:100%;background:var(--blue);border-right:1px solid var(--line);color:var(--ink2);padding:20px 12px}
+.sidebar .brand{color:var(--ink);font-size:20px;padding:0 10px 16px;display:flex}
+.sidebar button{width:100%;justify-content:flex-start;background:transparent;border:none;color:var(--ink2);font-weight:500}
+.sidebar button[aria-current=page]{background:var(--orange);color:var(--blue-dark);font-weight:700}
+.main{flex:999 1 560px;min-width:0;padding:24px}
+dialog{border:1px solid var(--line);border-radius:16px;padding:0;max-width:640px;width:94vw;background:var(--white);color:var(--ink2)}
+dialog::backdrop{background:rgba(0,0,0,.6)}
+dialog .card{border:none}
+@media print{.noprint{display:none!important}}
+
+/* Page d'accueil : image phénix */
+.hero{position:relative;border-radius:18px;overflow:hidden;background:var(--blue);border:1px solid var(--line);min-height:540px;display:flex;align-items:flex-end;justify-content:flex-end}
+.hero img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 20%}
+.hero .panel{position:relative;margin:20px;max-width:480px;background:rgba(17,11,6,.93);color:var(--ink2);border:1px solid var(--line);border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:12px}
+.hero h1{font-size:34px;color:var(--ink);letter-spacing:-.035em}
+.hero p{margin:0;color:var(--ink2)}
+@media (max-width:640px){.hero{min-height:520px}.hero .panel{margin:10px;padding:18px}.hero h1{font-size:24px}}
+
+/* Étiquettes et pastilles façon « Étude Congo » */
+.eyebrow{font-family:var(--mono);font-size:12px;text-transform:uppercase;letter-spacing:.22em;color:var(--orange)}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:999px;background:var(--orange-soft);border:1px solid #53412D;font-family:var(--mono);font-size:13px;color:var(--ink2)}
+.chip b{color:var(--orange-light);font-weight:600}
+input[type=checkbox],input[type=radio]{accent-color:var(--orange)}
+
+/* Carte des zones occupées */
+.heat-label{color:#fff;font:700 12px/20px var(--mono),monospace;text-align:center;text-shadow:0 1px 2px #000}
+.heat-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--ink2)}
+.heat-legend i{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+.surge{display:inline-flex;align-items:center;gap:6px;background:#2A1740;color:#D9BFFF;border:1px solid #5B2F94;border-radius:999px;padding:3px 10px;font-size:12px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em}

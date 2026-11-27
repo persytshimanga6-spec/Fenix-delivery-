@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Espace commerçant</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/app.css">
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <a class="brand" href="/" style="font-size:20px"><span data-company>Fenix Delivery</span> Pro</a>
+  <nav id="nav" class="hidden">
+    <a href="#envois" data-tab="envois">Mes envois</a><a href="#nouveau" data-tab="nouveau">Nouvel envoi</a>
+    <a href="#argent" data-tab="argent">Mon argent</a><a href="#compte" data-tab="compte">Mon compte</a><a href="#" id="out">Déconnexion</a>
+  </nav>
+</div></header>
+
+<div id="login" class="narrow hidden"><div class="card stack" style="margin-top:32px">
+  <h1>Espace commerçant</h1>
+  <form class="stack"><label class="f">Téléphone<input name="phone" type="tel" autocomplete="username" required></label>
+  <label class="f">Mot de passe<input name="password" type="password" autocomplete="current-password" required></label>
+  <button class="blue" type="submit">Se connecter</button></form>
+  <p class="small" style="margin:0">Pas encore de compte ? <a href="#inscription" id="toSignup">Devenir commerçant partenaire</a></p>
+</div></div>
+
+<section id="signup" class="narrow hidden"><form class="card stack" id="signupForm" style="margin-top:20px">
+  <h1>Devenir commerçant partenaire</h1>
+  <p class="muted small" style="margin:0">Ramassage chaque jour et argent reversé sous 48 h.</p>
+  <label class="f">Nom du commerce<input name="name" required></label>
+  <label class="f">Nom du responsable<input name="contact_name" required></label>
+  <label class="f">Téléphone (WhatsApp)<input name="phone" type="tel" required></label>
+  <label class="f">E-mail (pour recevoir les notifications)<input name="email" type="email" placeholder="boutique@exemple.com"></label>
+  <label class="f">Mot de passe (6 caractères minimum)<input name="password" type="password" minlength="6" required></label>
+  <div class="label">Type d'activité</div><div class="pills" id="kind"></div>
+  <div class="label">Lieu de ramassage</div>
+  <button type="button" class="blue" id="sLocate">Utiliser ma position GPS</button>
+  <div id="sMap" class="map"></div>
+  <label class="f">Commune<select name="commune" id="sCommune" required></select></label>
+  <label class="f">Repère<input name="landmark" placeholder="Ex. à côté de la poste" required></label>
+  <div class="label">Colis par jour (environ)</div><div class="pills" id="volume"></div>
+  <div class="label">Reversement de votre argent</div><div class="pills" id="op"></div>
+  <label class="f">Numéro Mobile Money<input name="payout_number" type="tel"></label>
+  <label class="row small"><input type="checkbox" name="accept" required> J'accepte les conditions et la liste des objets interdits (armes, drogues, argent liquide, produits dangereux).</label>
+  <button class="primary big" type="submit">Envoyer ma demande</button>
+  <a href="#" id="toLogin" class="small">J'ai déjà un compte</a>
+</form></section>
+
+<main id="app" class="wrap hidden">
+  <div id="pending" class="card hidden" style="margin-bottom:16px;background:var(--orange-soft);border-color:#53412D">
+    <strong>Compte en attente de validation.</strong> Un agent vous appelle sous 24 h. Vous pourrez créer vos envois après validation.
+  </div>
+
+  <section data-panel="envois" class="stack">
+    <div class="spread"><h1>Mes envois</h1><a class="btn primary" href="#nouveau">+ Nouvel envoi</a></div>
+    <div class="card scroll"><table><thead><tr><th>N° de suivi</th><th>Destinataire</th><th>Commune</th><th>Prix</th><th>À encaisser</th><th>Statut</th><th></th></tr></thead>
+    <tbody id="list"></tbody></table></div>
+  </section>
+
+  <section data-panel="nouveau" class="stack hidden">
+    <h1>Nouvel envoi</h1>
+    <form id="ship" class="grid2" style="align-items:start">
+      <div class="card stack">
+        <div class="label">Destinataire</div>
+        <label class="f">Nom complet<input name="recipient_name" required></label>
+        <label class="f">Téléphone<input name="recipient_phone" type="tel" required></label>
+        <label class="f">E-mail du client (facultatif)<input name="recipient_email" type="email" placeholder="Il recevra le suivi par e-mail"></label>
+        <div class="label">Livraison</div>
+        <div class="pills" id="mode"></div>
+        <div id="homeFields" class="stack">
+          <button type="button" class="blue" id="locate">Position GPS du destinataire (s'il est avec vous)</button>
+          <div id="map" class="map"></div>
+          <p class="tiny muted" style="margin:0">Touchez la carte ou déplacez le point jusqu'à la porte exacte.</p>
+          <label class="f">Repère (obligatoire)<input name="to_landmark" placeholder="Ex. portail bleu après l'église"></label>
+        </div>
+        <label class="f" id="agencyField">Agence de retrait<select name="pickup_agency_id" id="pickupAgency"></select></label>
+        <label class="f">Commune d'arrivée<select name="to_commune" id="toCommune" required></select></label>
+      </div>
+      <div class="card stack">
+        <div class="label">Colis</div>
+        <div class="pills" id="size"></div>
+        <label class="f">Contenu (facultatif)<input name="description" placeholder="Ex. 2 paires de chaussures"></label>
+        <label class="f">Valeur de la marchandise à encaisser (FC)<input name="cod_amount_fc" type="number" min="0" step="100" value="0"></label>
+        <p class="tiny muted" style="margin:0">Laissez 0 si le client a déjà payé la marchandise.</p>
+        <label class="row small"><input type="checkbox" name="express"> Express (moins de 2 h)</label>
+        <label class="row small"><input type="checkbox" name="insured" id="insured"> Assurer le colis</label>
+        <label class="f hidden" id="valueField">Valeur déclarée (FC)<input name="declared_value_fc" type="number" min="0" step="100"></label>
+        <div class="label">Qui paie la livraison ?</div>
+        <div class="pills" id="pay"></div>
+        <div class="card" style="background:var(--bg)">
+          <div id="quoteLines" class="small muted"></div>
+          <div class="spread"><span>Prix de la livraison</span><strong id="price" style="font-size:20px">—</strong></div>
+        </div>
+        <button class="primary big" type="submit">Créer l'envoi</button>
+      </div>
+    </form>
+  </section>
+
+  <section data-panel="argent" class="stack hidden">
+    <h1>Mon argent</h1>
+    <div class="grid">
+      <div class="card kpi"><div class="label">À recevoir</div><div class="v" id="mToReceive">—</div><div class="tiny muted">Marchandise encaissée, reversée sous 48 h</div></div>
+      <div class="card kpi"><div class="label">Déjà reversé</div><div class="v" id="mPaid">—</div></div>
+      <div class="card kpi"><div class="label">Livraisons à payer</div><div class="v" id="mUnpaid">—</div><div class="tiny muted">Envois « sur mon compte »</div></div>
+    </div>
+  </section>
+
+  <section data-panel="compte" class="stack hidden">
+    <h1>Mon compte</h1>
+    <form id="account" class="card stack" style="max-width:560px">
+      <div class="label">Notifications automatiques</div>
+      <p class="small muted" style="margin:0">À chaque étape (ramassé, en route, livré, échec, argent reversé), nous vous prévenons. Vos clients sont prévenus aussi, par SMS et par e-mail s’ils en ont un.</p>
+      <label class="f">Mon e-mail<input name="email" type="email" id="aEmail" placeholder="boutique@exemple.com"></label>
+      <label class="row small"><input type="checkbox" name="notify_sms" id="aSms"> Me prévenir par SMS</label>
+      <label class="row small"><input type="checkbox" name="notify_email" id="aMail"> Me prévenir par e-mail</label>
+      <button class="primary">Enregistrer</button>
+    </form>
+    <h2 style="margin-top:8px">Messages envoyés</h2>
+    <div class="card scroll"><table><thead><tr><th>Date</th><th>Pour</th><th>Canal</th><th>Message</th><th>État</th></tr></thead>
+    <tbody id="notifs"></tbody></table></div>
+  </section>
+</main>
+
+<script src="/vendor/leaflet/leaflet.js"></script>
+<script type="module">
+import { $, $$, api, esc, fc, when, toast, run, badge, pills, fillCommunes, mapPicker, requireLogin, logout, PAY } from '/assets/app.js';
+const cfg = await api('/api/config');
+$$('[data-company]').forEach((e) => (e.textContent = cfg.company));
+
+// ---------- Inscription ----------
+const signup = { kind: 'Vente en ligne', volume: '5-20', payout_operator: 'mpesa', lat: null, lng: null };
+let sPicker;
+function showSignup() {
+  $('#login').classList.add('hidden'); $('#signup').classList.remove('hidden');
+  if (!sPicker) sPicker = mapPicker($('#sMap'), (la, ln) => { signup.lat = la; signup.lng = ln; });
+  setTimeout(() => sPicker.map.invalidateSize(), 50);
+}
+fillCommunes($('#sCommune'), cfg.communes);
+pills($('#kind'), ['Vente en ligne', 'Boutique', 'Pharmacie', 'Restaurant', 'Entreprise', 'Autre'].map((x) => [x, x]), signup.kind, (v) => (signup.kind = v));
+pills($('#volume'), [['1-5', '1–5'], ['5-20', '5–20'], ['20-50', '20–50'], ['50+', '50+']], signup.volume, (v) => (signup.volume = v));
+pills($('#op'), [['mpesa', 'M-Pesa'], ['orange', 'Orange Money'], ['airtel', 'Airtel Money']], signup.payout_operator, (v) => (signup.payout_operator = v));
+$('#sLocate').onclick = run(() => sPicker.locate());
+$('#toSignup').onclick = (e) => { e.preventDefault(); showSignup(); };
+$('#toLogin').onclick = (e) => { e.preventDefault(); $('#signup').classList.add('hidden'); $('#login').classList.remove('hidden'); };
+$('#signupForm').onsubmit = run(async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target));
+  const r = await api('/api/merchants/signup', { method: 'POST', body: { ...f, ...signup, accept: !!f.accept } });
+  toast(r.message);
+  await api('/api/login', { method: 'POST', body: { phone: f.phone, password: f.password } });
+  location.hash = '#envois'; location.reload();
+});
+
+// ---------- Espace connecté ----------
+let me, profile, picker;
+const order = { size: 'petit', pay_method: 'cod', mode: 'domicile', to_lat: null, to_lng: null };
+
+function tab() {
+  const t = (location.hash || '#envois').slice(1);
+  if (t === 'inscription') return;
+  $$('[data-panel]').forEach((p) => p.classList.toggle('hidden', p.dataset.panel !== t));
+  if (t === 'envois') loadList();
+  if (t === 'argent') loadMoney();
+  if (t === 'compte') loadAccount();
+  if (t === 'nouveau') {
+    if (!picker) picker = mapPicker($('#map'), (la, ln) => { order.to_lat = la; order.to_lng = ln; quote(); });
+    setTimeout(() => picker.map.invalidateSize(), 50);
+  }
+}
+const loadList = run(async () => {
+  const rows = await api('/api/merchant/shipments');
+  $('#list').innerHTML = rows.map((r) => `<tr><td><a href="/suivi?n=${esc(r.tracking)}">${esc(r.tracking)}</a><div class="tiny muted">${when(r.created_at)}</div></td>
+    <td>${esc(r.recipient_name)}<div class="tiny muted">${esc(r.recipient_phone)}</div></td><td>${esc(r.to_commune)}</td>
+    <td>${fc(r.price_fc)}<div class="tiny muted">${esc(PAY[r.pay_method])}</div></td><td>${r.cod_amount_fc ? fc(r.cod_amount_fc) : '—'}</td>
+    <td>${badge(r.status, r.label)}</td><td><a class="btn" href="/etiquette/${esc(r.tracking)}" target="_blank" rel="noopener">Étiquette</a></td></tr>`).join('')
+    || '<tr><td colspan="7" class="muted">Aucun envoi pour l’instant.</td></tr>';
+});
+const loadMoney = run(async () => {
+  const s = await api('/api/merchant/summary');
+  $('#mToReceive').textContent = fc(s.to_receive_fc); $('#mPaid').textContent = fc(s.paid_fc); $('#mUnpaid').textContent = fc(s.unpaid_shipping_fc);
+});
+
+const STATE = { envoye: 'Envoyé', enregistre: 'Enregistré', envoi: 'En cours', echec: 'Échec' };
+const loadAccount = run(async () => {
+  profile = await api('/api/merchant/profile');
+  $('#aEmail').value = profile.email || ''; $('#aSms').checked = !!profile.notify_sms; $('#aMail').checked = !!profile.notify_email;
+  const rows = await api('/api/merchant/notifications');
+  $('#notifs').innerHTML = rows.map((n) => `<tr><td class="tiny">${when(n.created_at)}</td>
+    <td>${n.audience === 'client' ? 'Client' : 'Moi'}<div class="tiny muted">${esc(n.to_addr)}</div></td>
+    <td style="white-space:nowrap">${n.channel === 'email' ? 'E-mail' : 'SMS'}</td>
+    <td class="small">${n.subject ? `<strong>${esc(n.subject)}</strong><br>` : ''}${esc(n.channel === 'email' ? n.message.split('\n')[0] : n.message)}</td>
+    <td>${badge(n.status === 'echec' ? 'echec' : n.status === 'envoye' ? 'livre' : 'cree', STATE[n.status] || n.status)}</td></tr>`).join('')
+    || '<tr><td colspan="5" class="muted">Aucun message pour l’instant.</td></tr>';
+});
+$('#account').onsubmit = run(async (e) => {
+  e.preventDefault();
+  profile = await api('/api/merchant/profile', { method: 'PATCH', body: {
+    email: $('#aEmail').value.trim(), notify_sms: $('#aSms').checked, notify_email: $('#aMail').checked } });
+  toast('Compte enregistré');
+});
+
+const form = $('#ship');
+const quote = run(async () => {
+  const f = new FormData(form);
+  if (!f.get('to_commune')) { $('#price').textContent = '—'; $('#quoteLines').innerHTML = ''; return; }
+  const q = await api('/api/quote', { method: 'POST', body: {
+    from_commune: profile.commune, from_lat: profile.lat, from_lng: profile.lng, to_commune: f.get('to_commune'), size: order.size,
+    ...(order.mode === 'domicile' ? { to_lat: order.to_lat, to_lng: order.to_lng } : { pickup_agency_id: f.get('pickup_agency_id') }), express: !!f.get('express'),
+    insured: !!f.get('insured'), declared_value_fc: f.get('declared_value_fc'), cod_amount_fc: f.get('cod_amount_fc') } });
+  $('#quoteLines').innerHTML = q.lines.map((l) => (l.fc == null ? `<div class="surge" style="margin:2px 0">${esc(l.label)}</div>` : `<div class="spread"><span>${esc(l.label)}</span><span>${fc(l.fc)}</span></div>`)).join('');
+  $('#price').textContent = fc(q.price_fc);
+});
+form.oninput = quote;
+$('#insured').onchange = () => $('#valueField').classList.toggle('hidden', !$('#insured').checked);
+fillCommunes($('#toCommune'), cfg.communes);
+$('#pickupAgency').innerHTML = cfg.agencies.map((a) => `<option value="${a.id}" data-commune="${esc(a.commune || '')}">${esc(a.name)}</option>`).join('');
+$('#pickupAgency').onchange = () => { $('#toCommune').value = $('#pickupAgency').selectedOptions[0]?.dataset.commune || ''; quote(); };
+const setMode = (v) => {
+  order.mode = v;
+  $('#homeFields').classList.toggle('hidden', v !== 'domicile');
+  $('#agencyField').classList.toggle('hidden', v !== 'agence');
+  if (v === 'agence') $('#pickupAgency').onchange();
+  if (v === 'domicile' && picker) setTimeout(() => picker.map.invalidateSize(), 50);
+};
+pills($('#mode'), [['domicile', 'À domicile'], ['agence', 'Retrait en agence']], order.mode, setMode);
+setMode('domicile');
+pills($('#size'), [['petit', 'Petit · enveloppe, bijou'], ['moyen', 'Moyen · chaussures'], ['grand', 'Grand · carton']], order.size, (v) => { order.size = v; quote(); });
+pills($('#pay'), [['cod', 'Le destinataire paie'], ['compte', 'Sur mon compte']], order.pay_method, (v) => (order.pay_method = v));
+$('#locate').onclick = run(() => picker.locate());
+
+form.onsubmit = run(async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(form));
+  const body = { ...f, size: order.size, pay_method: order.pay_method, express: !!f.express, insured: !!f.insured };
+  if (order.mode === 'domicile') { body.to_lat = order.to_lat; body.to_lng = order.to_lng; delete body.pickup_agency_id; }
+  else { delete body.to_landmark; }
+  const s = await api('/api/merchant/shipments', { method: 'POST', body });
+  toast(`Envoi ${s.tracking} créé. Le client a reçu son code${s.recipient_email ? ' par SMS et e-mail' : ' par SMS'}.`);
+  window.open('/etiquette/' + s.tracking, '_blank', 'noopener');
+  form.reset(); location.hash = '#envois';
+});
+
+$('#out').onclick = (e) => { e.preventDefault(); logout(); };
+if (location.hash === '#inscription') { $('#login').classList.add('hidden'); showSignup(); }
+else requireLogin(['commercant'], async (u) => {
+  me = u; profile = await api('/api/merchant/profile');
+  $('#nav').classList.remove('hidden');
+  $('#pending').classList.toggle('hidden', profile.status === 'actif');
+  window.onhashchange = tab; tab();
+});
+</script>
+</body>
+</html>

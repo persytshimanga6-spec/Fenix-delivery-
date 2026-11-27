@@ -1,0 +1,16 @@
+# En ligne : l'appli n'est plus ouverte directement, Caddy s'occupe du HTTPS (certificat gratuit Let's Encrypt).
+services:
+  fenix-delivery:
+    ports: !reset []
+    expose: ["3000"]
+  caddy:
+    image: caddy:2
+    container_name: fenix-caddy
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on: [fenix-delivery]
+volumes:
+  caddy-data:

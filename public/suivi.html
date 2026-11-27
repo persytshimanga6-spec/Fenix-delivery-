@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Suivi de colis</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/app.css">
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+</head>
+<body>
+<header class="top"><div class="wrap"><a class="brand" href="/" style="font-size:20px" data-company>Fenix Delivery</a><nav><a href="/">Accueil</a></nav></div></header>
+<main class="narrow stack">
+  <form id="f" class="row card">
+    <label for="n" class="hidden">Numéro de suivi</label>
+    <input id="n" placeholder="Numéro de suivi" required style="flex:1;min-width:200px">
+    <button class="blue" type="submit">Suivre</button>
+  </form>
+  <div id="out" class="stack"></div>
+</main>
+<script src="/vendor/leaflet/leaflet.js"></script>
+<script type="module">
+import { $, api, esc, fc, when } from '/assets/app.js';
+const cfg = await api('/api/config');
+document.querySelectorAll('[data-company]').forEach((e) => (e.textContent = cfg.company));
+const params = new URLSearchParams(location.search);
+let timer, map;
+
+async function show(n) {
+  clearTimeout(timer);
+  try {
+    const t = await api('/api/track/' + encodeURIComponent(n));
+    const last = t.events.length - 1;
+    $('#out').innerHTML = `<div class="card stack">
+      <div class="small muted">N° ${esc(t.tracking)} · de ${esc(t.sender)} (${esc(t.from_commune)}) vers ${esc(t.to_commune)}</div>
+      <h1>${esc(t.label)}</h1>
+      ${t.pickup_agency ? `<p style="margin:0">À retirer : <strong>${esc(t.pickup_agency.name)}</strong> · ${esc(t.pickup_agency.address || t.pickup_agency.commune || '')}</p>` : ''}
+      ${t.due_fc ? `<p style="margin:0">À payer à la réception : <strong>${fc(t.due_fc)}</strong></p>` : ''}
+      ${t.driver ? `<p style="margin:0">Votre livreur : <strong>${esc(t.driver.name)}</strong>${t.driver.seen ? ' · position du ' + when(t.driver.seen) : ''}</p>` : ''}
+      <div id="map" class="map ${t.driver?.lat ? '' : 'hidden'}"></div>
+      <p class="small muted" style="margin:0">Le code de livraison vous a été envoyé par SMS. Donnez-le seulement quand vous avez le colis en main.</p>
+    </div>
+    <div class="card"><ol class="timeline">${t.events.map((e, i) => `<li class="${i === last ? 'now' : ''}"><div><strong>${esc(e.label)}</strong><div class="small muted">${when(e.at)}</div></div></li>`).join('')}</ol></div>`;
+    if (t.driver?.lat) {
+      map = L.map('map').setView([t.driver.lat, t.driver.lng], 14);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+      L.circleMarker([t.driver.lat, t.driver.lng], { radius: 9, color: '#110B06', fillOpacity: 1 }).addTo(map).bindTooltip('Livreur');
+      if (t.to_lat) L.marker([t.to_lat, t.to_lng]).addTo(map).bindTooltip('Vous');
+    }
+    if (!['livre', 'retire', 'annule', 'retour'].includes(t.status)) timer = setTimeout(() => show(n), 60000);
+  } catch (e) {
+    $('#out').innerHTML = `<div class="card"><strong>${esc(e.message)}</strong><p class="muted">Vérifiez le numéro reçu par SMS.</p></div>`;
+  }
+}
+$('#f').onsubmit = (e) => { e.preventDefault(); const n = $('#n').value.trim().toUpperCase(); history.replaceState(null, '', '?n=' + n); show(n); };
+if (params.get('n')) { $('#n').value = params.get('n'); show(params.get('n')); }
+</script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 8 80 86" role="img" aria-label="Fenix Delivery"><g fill="#F0905A">
+    <!-- aile gauche, en flammes -->
+    <path d="M47 60 C37 56 24 50 13 31 C21 36 27 38 32 38 C24 30 21 21 23 11 C29 25 38 35 47 45 Z"/>
+    <!-- aile droite -->
+    <path d="M53 60 C63 56 76 50 87 31 C79 36 73 38 68 38 C76 30 79 21 77 11 C71 25 62 35 53 45 Z"/>
+    <!-- corps -->
+    <path d="M44 46 C43 54 46 59 50 61 C54 59 57 54 56 46 Z"/>
+    <!-- tête, cou et crête -->
+    <path d="M45 50 C43 40 44 31 49 25 C52 22 57 21 60 24 L70 27.5 L60 30 C57 37 54 44 55 50 Z"/>
+    <path d="M49 26 C45 21 40 19 33 20 C39 22 43 26 45 31 Z"/>
+    <!-- queue : trois flammes, comme un élan vers l'avant -->
+    <path d="M50 58 C46 68 38 76 27 82 C37 82 44 79 48 74 C46 81 47 87 51 92 C51 84 53 77 55 72 C58 78 63 81 70 82 C62 76 56 68 54 58 Z"/>
+  </g><circle cx="56" cy="27" r="1.6" fill="#16100A"/></svg>

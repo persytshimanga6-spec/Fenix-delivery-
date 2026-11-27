@@ -113,6 +113,17 @@ Sans nom de domaine, le site marche quand même en HTTPS, avec une adresse gratu
 
 La carte « Où sont les colis » du back office aide à envoyer les livreurs au bon endroit. Elle ne change pas le prix.
 
+## 5 ter. Appli mobile « Fenix Livreur » (Android)
+
+L'appli mobile est **la même appli livreur** que `/livreur/`, mise dans une vraie appli Android avec Capacitor. Elle utilise le même serveur, les mêmes comptes et les mêmes colis. La version web continue de marcher.
+
+- **Dans l'appli** : le GPS et le scanner de QR code du téléphone (scanner Google), la photo avec l'appareil photo, et le code à 4 chiffres.
+- **Construction automatique** : à chaque changement de `mobile/` ou de `public/livreur/`, GitHub construit l'APK (onglet *Actions*) et le publie dans *Releases*.
+- **Lien à envoyer aux livreurs (WhatsApp)** : `https://github.com/persytshimanga6-spec/Fenix-delivery-/releases/latest/download/fenix-livreur.apk`
+- **Changer l'adresse du serveur** (par exemple pour passer en HTTPS) : *Actions › Appli Android Fenix Livreur › Run workflow*, puis mettre l'adresse. On peut aussi créer la variable `FENIX_SERVER` dans *Settings › Secrets and variables › Actions › Variables*.
+- **Signature** : pour les tests, l'APK est signé avec la clé de test du dépôt (`mobile/android/fenix-test.keystore`). Avant le Play Store, il faut créer une vraie clé et la mettre dans les secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` et `ANDROID_KEY_PASSWORD`.
+- **Sur un PC, à la main** : `cd mobile && npm ci && FENIX_SERVER=http://… npm run sync && cd android && ./gradlew assembleRelease`. Il faut Android Studio ou le SDK Android, et Java 21.
+
 ## 6. Notifications automatiques (SMS + e-mail)
 
 À chaque étape, le **client** (destinataire) et le **vendeur** (commerçant, ou expéditeur venu au comptoir) sont prévenus :

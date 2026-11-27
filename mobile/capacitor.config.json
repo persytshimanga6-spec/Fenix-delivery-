@@ -1,0 +1,13 @@
+{
+  "appId": "com.fenixdelivery.livreur",
+  "appName": "Fenix Livreur",
+  "webDir": "www",
+  "server": {
+    "url": "http://64.23.191.226:8081/livreur/",
+    "cleartext": true,
+    "errorPath": "offline.html"
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}

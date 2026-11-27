@@ -93,7 +93,7 @@ r.post('/shipments/:t/resend-code', async (req, res) => {
 r.post('/depot/scan', (req, res) => res.json(depotScan(mustGet(req.body.tracking), req.user)));
 
 // ----- Personnes -----
-r.get('/users', (_req, res) => res.json(db.prepare(`SELECT u.id, u.role, u.name, u.phone, u.zone, u.active, u.agency_id, a.name agency_name, u.created_at,
+r.get('/users', (_req, res) => res.json(db.prepare(`SELECT u.id, u.role, u.name, u.phone, u.zone, u.active, u.agency_id, a.name agency_name, u.created_at, u.driver_kind,
   p.license_no, p.experience_years, p.status application_status
   FROM users u LEFT JOIN agencies a ON a.id = u.agency_id LEFT JOIN driver_profiles p ON p.user_id = u.id
   WHERE u.role != 'commercant' AND COALESCE(p.status, 'valide') != 'en_attente' ORDER BY u.role, u.name`).all()));
@@ -101,7 +101,7 @@ r.get('/users', (_req, res) => res.json(db.prepare(`SELECT u.id, u.role, u.name,
 // Candidatures de livreurs (formulaire « Postuler »).
 r.get('/applications', (req, res) => {
   const st = ['en_attente', 'valide', 'refuse'].includes(req.query.status) ? req.query.status : 'en_attente';
-  res.json(db.prepare(`SELECT p.*, u.name full_name, u.phone FROM driver_profiles p JOIN users u ON u.id = p.user_id
+  res.json(db.prepare(`SELECT p.*, u.name full_name, u.phone, u.driver_kind FROM driver_profiles p JOIN users u ON u.id = p.user_id
     WHERE p.status = ? ORDER BY p.created_at`).all(st));
 });
 r.post('/applications/:id', (req, res) => res.json(decide(Number(req.params.id), req.body.decision, req.user.id, req.body.zone)));
@@ -122,6 +122,10 @@ r.patch('/users/:id', (req, res) => {
   if (u.id === req.user.id && req.body.active === false) fail(400, 'Vous ne pouvez pas désactiver votre propre compte');
   if (req.body.active && db.prepare("SELECT 1 FROM driver_profiles WHERE user_id = ? AND status != 'valide'").get(u.id)) fail(409, 'Validez d’abord la candidature de ce livreur');
   if ('active' in req.body) db.prepare('UPDATE users SET active = ? WHERE id = ?').run(req.body.active ? 1 : 0, u.id);
+  if ('driver_kind' in req.body) {
+    if (!['salarie', 'independant'].includes(req.body.driver_kind)) fail(400, 'Type de chauffeur : salarié ou indépendant');
+    db.prepare('UPDATE users SET driver_kind = ? WHERE id = ?').run(req.body.driver_kind, u.id);
+  }
   if (req.body.password) db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash(req.body.password), u.id);
   if ('zone' in req.body) db.prepare('UPDATE users SET zone = ? WHERE id = ?').run(req.body.zone || null, u.id);
   res.json({ ok: true });
@@ -159,7 +163,7 @@ r.put('/rates', (req, res) => {
       if (int(x.price_fc) <= 0) fail(400, 'Prix invalide');
       db.prepare('UPDATE rates SET price_fc = ? WHERE zone = ? AND size = ?').run(int(x.price_fc), int(x.zone), x.size);
     }
-    const allowed = ['company_name', 'express_supplement_fc', 'retry_fee_fc', 'insurance_pct', 'driver_share_pct', 'relay_commission_pct',
+    const allowed = ['company_name', 'express_supplement_fc', 'retry_fee_fc', 'insurance_pct', 'driver_share_salarie_pct', 'driver_share_independant_pct', 'relay_commission_pct',
       'base_petit_fc', 'base_moyen_fc', 'base_grand_fc', 'fuel_price_fc', 'fuel_l_per_km', 'minute_fc', 'speed_normal_kmh', 'speed_rush_kmh',
       'rush_hours', 'road_factor', 'momo_mpesa', 'momo_orange', 'momo_airtel'];
     for (const [k, v] of Object.entries(req.body.settings || {})) {
@@ -229,17 +233,21 @@ r.get('/cash', (_req, res) => {
     SUM(CASE WHEN method != 'cash' THEN amount_fc ELSE 0 END) mobile_fc,
     COUNT(DISTINCT shipment_id) shipments
     FROM cash WHERE closing_id IS NULL GROUP BY holder_type, holder_id`).all();
-  const share = Number(setting('driver_share_pct', 0)) / 100;
+  // Chaque livreur a le taux de SON type (salarié ou indépendant).
+  const pct = { salarie: Number(setting('driver_share_salarie_pct', 0)), independant: Number(setting('driver_share_independant_pct', 0)) };
   const rows = open.map((o) => {
     const h = o.holder_type === 'livreur'
       ? db.prepare('SELECT name FROM users WHERE id = ?').get(o.holder_id)
       : db.prepare('SELECT name FROM agencies WHERE id = ?').get(o.holder_id);
     return { ...o, name: h?.name || '?' };
   });
-  const drivers = db.prepare(`SELECT u.id, u.name, COUNT(s.id) delivered, COALESCE(SUM(s.price_fc),0) port_fc
+  const drivers = db.prepare(`SELECT u.id, u.name, u.driver_kind, COUNT(s.id) delivered, COALESCE(SUM(s.price_fc),0) port_fc
     FROM users u LEFT JOIN shipments s ON s.driver_id = u.id AND s.status = 'livre' AND date(s.delivered_at) = date('now')
     WHERE u.role = 'livreur' AND u.active = 1 GROUP BY u.id ORDER BY u.name`).all()
-    .map((d) => ({ ...d, share_fc: Math.round(d.port_fc * share) }));
+    .map((d) => {
+      const rate = pct[d.driver_kind] ?? pct.salarie;
+      return { ...d, share_pct: rate, share_fc: Math.round(d.port_fc * rate / 100) };
+    });
   const closings = db.prepare(`SELECT c.*, CASE c.holder_type WHEN 'livreur' THEN (SELECT name FROM users WHERE id = c.holder_id)
     ELSE (SELECT name FROM agencies WHERE id = c.holder_id) END name FROM closings c WHERE c.day = ? ORDER BY c.id DESC`).all(today());
   res.json({ open: rows, drivers, closings });

@@ -50,6 +50,8 @@ header.d{padding:14px 16px;display:flex;justify-content:space-between;align-item
     <label class="f" style="color:#E5D6C2">Années d'expérience de conduite
       <select name="experience_years" required><option value="">Choisir</option><option value="1">Moins de 2 ans</option>
         <option value="2">2 ans</option><option value="3">3 ans</option><option value="4">4 ans</option><option value="5">5 ans ou plus</option></select></label>
+    <div class="label">Type de chauffeur</div>
+    <div class="pills" id="aKind"></div>
     <div class="label">Handicap</div>
     <div class="pills" id="aDis"></div>
     <label class="f hidden" id="aDisNote" style="color:#E5D6C2">Précisez<input name="disability_note"></label>
@@ -298,7 +300,7 @@ $('#cashBtn').onclick = run(async () => {
 $('#refresh').onclick = () => { flush(); load(); };
 
 // ---------- Postuler comme livreur ----------
-const apply = { disability: null, criminal_record: null };
+const apply = { disability: null, criminal_record: null, driver_kind: null };
 const showApply = (on) => { $('#apply').classList.toggle('hidden', !on); $('#login').classList.toggle('hidden', on); };
 $('#toApply').onclick = (e) => { e.preventDefault(); showApply(true); };
 $('#toLogin').onclick = (e) => { e.preventDefault(); showApply(false); };
@@ -310,11 +312,13 @@ const updateName = () => {
 af.oninput = updateName;
 pills($('#aDis'), [['non', 'Non'], ['oui', 'Oui']], null, (v) => { apply.disability = v; $('#aDisNote').classList.toggle('hidden', v !== 'oui'); });
 pills($('#aCrime'), [['non', 'Non'], ['oui', 'Oui']], null, (v) => (apply.criminal_record = v));
+pills($('#aKind'), [['salarie', 'Salarié de Fenix'], ['independant', 'Indépendant (ma moto, mon essence)']], null, (v) => (apply.driver_kind = v));
 af.onsubmit = run(async (e) => {
   e.preventDefault();
   const f = Object.fromEntries(new FormData(af));
   if (new Date().getFullYear() - Number(f.birth_year) < 18) throw new Error('Il faut avoir 18 ans ou plus');
   if (Number(f.experience_years) < 2) throw new Error('Il faut au moins 2 ans d’expérience de conduite');
+  if (!apply.driver_kind) throw new Error('Choisissez le type de chauffeur');
   if (!apply.disability) throw new Error('Handicap : répondez Oui ou Non');
   if (!apply.criminal_record) throw new Error('Répondez à la question sur les antécédents');
   const r = await api('/api/drivers/apply', { method: 'POST', body: { ...f, ...apply } });

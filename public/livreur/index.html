@@ -6,6 +6,7 @@
 <link rel="manifest" href="/livreur/manifest.json">
 <title>Appli livreur</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
 <link rel="stylesheet" href="/assets/app.css">
 <style>
 body{background:var(--night);color:#F5EDE2}
@@ -25,6 +26,19 @@ header.d{padding:calc(14px + var(--sat)) 16px 14px;display:flex;justify-content:
 #scanBox{background:#000;border-radius:14px;overflow:hidden}
 .net{font-size:12px;padding:4px 10px;border-radius:999px;background:#14532D;color:#BBF7D0;font-weight:700}
 .net.off{background:#7F1D1D;color:#FECACA}
+/* Guidage (comme Yango / Uber) */
+#navView{position:fixed;inset:0;z-index:50;background:var(--bg);display:flex;flex-direction:column}
+#navView.hidden{display:none}
+.nav-top{background:#F0905A;color:#110B06;padding:calc(12px + var(--sat)) 16px 12px;display:flex;gap:12px;align-items:center}
+.nav-arrow{font-size:34px;line-height:1;width:44px;text-align:center;font-weight:800}
+.nav-text{font:800 20px/1.2 var(--display),system-ui,sans-serif}
+.nav-dist{font:700 14px var(--mono),monospace;opacity:.85;margin-top:2px;text-transform:uppercase;letter-spacing:.05em}
+#navMap{flex:1;min-height:200px}
+.nav-bottom{background:#1A120B;border-top:1px solid #3A2B1D;padding:12px 16px calc(12px + env(safe-area-inset-bottom, 0px));display:flex;flex-direction:column;gap:10px}
+.nav-eta{font:800 18px var(--display),system-ui,sans-serif;color:#F5EDE2}
+.nav-eta small{display:block;font:600 13px system-ui,sans-serif;color:#A89A88;margin-top:2px}
+.nav-warn{background:#3a1d12;color:#F4B683;padding:8px 12px;font-size:13px;border-radius:10px}
+.nav-me{width:18px;height:18px;border-radius:50%;background:#3B82F6;border:3px solid #fff;box-shadow:0 0 0 6px rgba(59,130,246,.25)}
 </style>
 </head>
 <body>
@@ -103,9 +117,26 @@ header.d{padding:calc(14px + var(--sat)) 16px 14px;display:flex;justify-content:
   <div class="row"><button type="button" id="fCancel">Annuler</button><button class="primary" type="submit" style="flex:1">Envoyer</button></div>
 </form></dialog>
 
+<div id="navView" class="hidden" aria-live="polite">
+  <div class="nav-top"><div class="nav-arrow" id="navArrow">↑</div><div style="flex:1"><div class="nav-text" id="navText">Calcul de l'itinéraire…</div><div class="nav-dist" id="navDist"></div></div>
+    <button id="navVoice" class="ghost" style="background:#110B06;color:#F5EDE2;border:0" aria-label="Voix">🔊</button></div>
+  <div id="navWarn" class="nav-warn hidden" style="margin:8px 12px 0"></div>
+  <div id="navMap"></div>
+  <div class="nav-bottom">
+    <div class="spread"><div class="nav-eta" id="navEta">—<small id="navWho"></small></div><button id="navClose" aria-label="Fermer le guidage">Fermer</button></div>
+    <div class="row" style="gap:8px">
+      <a class="btn" style="flex:1" id="navCall">Appeler</a>
+      <a class="btn blue" style="flex:1" id="navGmaps" target="_blank" rel="noopener">Ouvrir dans Google Maps</a>
+    </div>
+    <button class="primary big" id="navDeliver">Livrer (code + photo)</button>
+  </div>
+</div>
+
+<script src="/vendor/leaflet/leaflet.js"></script>
 <script src="/vendor/html5-qrcode/html5-qrcode.min.js"></script>
 <script type="module">
-import { $, $$, api, esc, fc, toast, run, pills, requireLogin, logout, PAY } from '/assets/app.js';
+import { $, $$, api, esc, fc, toast, run, pills, requireLogin, logout, PAY, addTiles } from '/assets/app.js';
+import { createGuide, fmtDist, fmtKm, fmtMin, fmtClock, dist } from '/assets/nav.js';
 const cfg = await api('/api/config');
 $$('[data-company]').forEach((e) => (e.textContent = cfg.company));
 // Dans l'appli mobile « Fenix Livreur » (Capacitor), on utilise le GPS et le scanner du téléphone.
@@ -148,14 +179,14 @@ addEventListener('offline', netState);
 
 // ---------- Position GPS (partagée tant que l'appli est ouverte : sert au suivi et à l'organisation des livreurs) ----------
 async function watchGps() {
-  const onPos = (p) => { if (p?.coords) pos = { lat: p.coords.latitude, lng: p.coords.longitude }; };
+  const onPos = (p) => { if (p?.coords) { pos = { lat: p.coords.latitude, lng: p.coords.longitude }; gpsAt = Date.now(); navOnPos(); } };
   if (NATIVE && Native.Geolocation) {
     try {
       await Native.Geolocation.requestPermissions();
-      await Native.Geolocation.watchPosition({ enableHighAccuracy: true, maximumAge: 30000 }, (p) => onPos(p));
+      await Native.Geolocation.watchPosition({ enableHighAccuracy: true, maximumAge: 3000 }, (p) => onPos(p));
     } catch { toast('Activez la localisation pour Fenix Livreur', true); }
   } else if (navigator.geolocation) {
-    navigator.geolocation.watchPosition(onPos, () => {}, { enableHighAccuracy: true, maximumAge: 30000 });
+    navigator.geolocation.watchPosition(onPos, () => {}, { enableHighAccuracy: true, maximumAge: 3000 });
   }
   setInterval(() => {
     if (pos.lat && navigator.onLine) api('/api/driver/location', { method: 'POST', body: pos }).catch(() => {});
@@ -190,7 +221,8 @@ function card(s) {
     ${!pickup && !toAgency && s.due.total ? `<div class="due">Ancien colis, à encaisser : ${fc(s.due.total)}</div>` : ''}
     ${s.attempts ? `<div class="tiny muted">Tentatives : ${s.attempts}</div>` : ''}
     <div class="row" style="gap:8px">
-      ${link ? `<a class="btn blue" style="flex:1" href="${link}" target="_blank" rel="noopener">Naviguer</a>` : ''}
+      ${s.status === 'en_livraison' && !toAgency && s.to_lat ? '<button class="blue" data-a="guide" style="flex:1">Guidage</button>' : ''}
+      ${link ? `<a class="btn" style="flex:1" href="${link}" target="_blank" rel="noopener">Ouvrir dans Google Maps</a>` : ''}
       <a class="btn" style="flex:1" href="tel:${esc(phone)}">Appeler</a>
       ${s.status === 'en_livraison' && !toAgency ? '<button data-a="fail" style="flex:1">Échec</button>' : ''}
     </div>
@@ -212,12 +244,93 @@ $('#list').onclick = run(async (e) => {
   const t = b.closest('[data-t]').dataset.t; const s = items.find((x) => x.tracking === t);
   const a = b.dataset.a;
   if (a === 'pickup') { current = s; return openScan(); }
-  if (a === 'start') { await act(`/api/driver/shipments/${t}/start`, pos, 'Départ en livraison'); toast('Bonne route !'); }
+  if (a === 'start') {
+    await act(`/api/driver/shipments/${t}/start`, pos, 'Départ en livraison'); toast('Bonne route !');
+    if (!s.pickup_agency_id && s.to_lat) { await load(); return openGuide({ ...s, status: 'en_livraison' }); } // le guidage s'affiche
+  }
+  if (a === 'guide') return openGuide(s);
   if (a === 'drop') { await api(`/api/driver/shipments/${t}/drop-agency`, { method: 'POST', body: pos }); toast('Colis déposé à l’agence'); }
   if (a === 'deliver') return openDeliver(s);
   if (a === 'fail') { current = s; reason = ''; $('#failForm').reset(); return $('#failDlg').showModal(); }
   load();
 });
+
+// ---------- Guidage dans Fenix (itinéraire OSRM, instructions en français, voix) ----------
+let gpsAt = 0, navShip = null, navMap = null, navLine = null, navMe = null, navDest = null, navRetry = null, gpsCheck = null;
+const ARROW = (t) => /demi-tour/.test(t) ? '↶' : /légèrement à gauche/.test(t) ? '↖' : /légèrement à droite/.test(t) ? '↗' : /gauche/.test(t) ? '←'
+  : /droite/.test(t) ? '→' : /rond-point/i.test(t) ? '⟳' : /arrivé/.test(t) ? '◎' : '↑';
+const VKEY = 'fx_voice';
+function say(text) {
+  if (!guide.voice || !text) return;
+  if (NATIVE && Native.TextToSpeech) { Native.TextToSpeech.speak({ text, lang: 'fr-FR', rate: 1.0 }).catch(() => {}); return; }
+  try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.lang = 'fr-FR'; speechSynthesis.speak(u); } catch { /* pas de voix */ }
+}
+const guide = createGuide({ speak: say, reroute: (p) => fetchRoute(p) });
+try { guide.setVoice(localStorage.getItem(VKEY) !== '0'); } catch { guide.setVoice(true); }
+const voiceBtn = () => { $('#navVoice').textContent = guide.voice ? '🔊' : '🔇'; $('#navVoice').setAttribute('aria-label', guide.voice ? 'Couper la voix' : 'Activer la voix'); };
+$('#navVoice').onclick = () => { guide.setVoice(!guide.voice); try { localStorage.setItem(VKEY, guide.voice ? '1' : '0'); } catch {} voiceBtn(); toast(guide.voice ? 'Voix activée' : 'Voix coupée'); };
+const warn = (t) => { $('#navWarn').textContent = t || ''; $('#navWarn').classList.toggle('hidden', !t); };
+
+let routeBusy = false;
+async function fetchRoute(from) {
+  if (!navShip || routeBusy) return;
+  routeBusy = true;
+  clearTimeout(navRetry);
+  const dest = { lat: navShip.to_lat, lng: navShip.to_lng };
+  try {
+    const r = await api(`/api/driver/route?from=${from.lat},${from.lng}&to=${dest.lat},${dest.lng}`);
+    guide.setRoute(r);
+    navLine?.remove(); navLine = L.polyline(r.coords, { color: '#F0905A', weight: 7, opacity: .95 }).addTo(navMap);
+    warn('');
+    navOnPos(true);
+  } catch {
+    // Repli : ligne droite + Google Maps ; on réessaie dans une minute. La livraison n'est jamais bloquée.
+    guide.setRoute(null);
+    navLine?.remove(); navLine = L.polyline([[from.lat, from.lng], [dest.lat, dest.lng]], { color: '#F0905A', weight: 4, dashArray: '8 8' }).addTo(navMap);
+    warn('Itinéraire indisponible : ligne droite affichée. Utilisez « Ouvrir dans Google Maps » si besoin.');
+    $('#navArrow').textContent = '↑'; $('#navText').textContent = 'Dirigez-vous vers la destination';
+    $('#navDist').textContent = `à vol d'oiseau : ${fmtKm(dist(from, dest))}`;
+    navRetry = setTimeout(() => pos.lat && fetchRoute(pos), 60000);
+  } finally { routeBusy = false; }
+}
+
+function navOnPos(fit = false) {
+  if (!navShip || $('#navView').classList.contains('hidden') || !pos.lat) return;
+  const ll = [pos.lat, pos.lng];
+  if (!navMe) navMe = L.marker(ll, { icon: L.divIcon({ className: '', html: '<div class="nav-me"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }), interactive: false }).addTo(navMap);
+  navMe.setLatLng(ll);
+  if (!guide.route && !navLine) return fetchRoute(pos);
+  if (fit && navLine) navMap.fitBounds(navLine.getBounds(), { padding: [30, 30] }); else navMap.panTo(ll, { animate: true });
+  const g = guide.update(pos);
+  if (!g) return;
+  if (g.arrived) {
+    $('#navArrow').textContent = '◎'; $('#navText').textContent = 'Vous êtes arrivé'; $('#navDist').textContent = 'Demandez le code au client';
+  } else {
+    $('#navArrow').textContent = ARROW(g.text); $('#navText').textContent = g.text; $('#navDist').textContent = fmtDist(g.toTurn);
+  }
+  $('#navEta').firstChild.textContent = `Reste ${fmtKm(g.remaining)} · ${fmtMin(g.remainingS)} · Arrivée ${fmtClock(new Date(Date.now() + g.remainingS * 1000))}`;
+  if (g.rerouting) warn('Nouvel itinéraire…'); else if ($('#navWarn').textContent === 'Nouvel itinéraire…') warn('');
+}
+
+function openGuide(s) {
+  navShip = s; guide.setRoute(null); navLine = null; navMe = null;
+  $('#navView').classList.remove('hidden');
+  $('#navWho').textContent = `${s.recipient_name} · ${s.to_commune}${s.to_landmark ? ` · ${s.to_landmark}` : ''}`;
+  $('#navCall').href = `tel:${s.recipient_phone}`;
+  $('#navGmaps').href = nav(s.to_lat, s.to_lng);
+  $('#navText').textContent = 'Calcul de l’itinéraire…'; $('#navDist').textContent = ''; $('#navEta').firstChild.textContent = '—'; warn('');
+  voiceBtn();
+  if (!navMap) { navMap = L.map('navMap', { zoomControl: false }).setView([s.to_lat, s.to_lng], 15); addTiles(navMap); }
+  else { navMap.eachLayer((l) => { if (l instanceof L.Marker || l instanceof L.Polyline) l.remove(); }); navMap.setView([s.to_lat, s.to_lng], 15); }
+  navDest = L.marker([s.to_lat, s.to_lng]).addTo(navMap);
+  setTimeout(() => navMap.invalidateSize(), 50);
+  if (pos.lat) fetchRoute(pos);
+  clearTimeout(gpsCheck);
+  gpsCheck = setTimeout(() => { if (!pos.lat || Date.now() - gpsAt > 60000) warn('GPS indisponible : vérifiez la localisation du téléphone. La carte et Google Maps restent utilisables.'); }, 10000);
+}
+function closeGuide() { $('#navView').classList.add('hidden'); navShip = null; clearTimeout(navRetry); clearTimeout(gpsCheck); try { speechSynthesis.cancel(); } catch {} }
+$('#navClose').onclick = closeGuide;
+$('#navDeliver').onclick = () => { const s = items.find((x) => x.tracking === navShip?.tracking) || navShip; closeGuide(); if (s) openDeliver(s); };
 
 // ---------- Scan QR (ramassage, ou retrouver un colis) ----------
 let scanner;

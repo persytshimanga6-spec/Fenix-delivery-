@@ -5,6 +5,20 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 
+// Faux serveur OSRM (itinéraires) : aucun appel Internet pendant les tests.
+import http from 'node:http';
+const osrm = http.createServer((req, res) => {
+  res.setHeader('content-type', 'application/json');
+  res.end(JSON.stringify({ code: 'Ok', routes: [{ distance: 1200, duration: 300,
+    geometry: { coordinates: [[15.30, -4.32], [15.305, -4.32], [15.305, -4.325]] },
+    legs: [{ steps: [
+      { maneuver: { type: 'depart', location: [15.30, -4.32] }, name: 'Boulevard du 30 Juin', distance: 600, duration: 150 },
+      { maneuver: { type: 'turn', modifier: 'right', location: [15.305, -4.32] }, name: 'Avenue Kasa-Vubu', distance: 600, duration: 150 },
+      { maneuver: { type: 'arrive', location: [15.305, -4.325] }, name: '', distance: 0, duration: 0 }] }] }] }));
+}).listen(0);
+await new Promise((ok) => osrm.once('listening', ok));
+process.env.OSRM_URL = `http://127.0.0.1:${osrm.address().port}`;
+
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kincolis-'));
 Object.assign(process.env, { DATA_DIR: dir, SHOW_OTP: '1', NO_LISTEN: '1', SEED_DEMO: '1', NODE_ENV: 'test', ADMIN_PHONE: '0800000000', ADMIN_PASSWORD: 'admin123' });
 const { app } = await import('../src/server.js');
@@ -511,8 +525,19 @@ try {
     assert.equal((await admin.call('PATCH', `/api/admin/users/${meAdmin.id}`, { active: false })).status, 400);
     assert.equal((await admin.call('POST', '/api/admin/stock', { agency_id: 99999, product_id: 1, delta: 1 })).status, 400);
   });
+  await step('guidage : itinéraire OSRM pour le livreur, repli si OSRM ne répond pas', async () => {
+    assert.equal((await pub.call('GET', '/api/driver/route?from=-4.32,15.30&to=-4.325,15.305')).status, 401);
+    assert.equal((await driver.call('GET', '/api/driver/route?from=abc&to=-4.325,15.305')).status, 400);
+    const r = await driver.ok('GET', '/api/driver/route?from=-4.32,15.30&to=-4.325,15.305');
+    assert.equal(r.distance, 1200); assert.equal(r.coords.length, 3);
+    assert.deepEqual(r.coords[0], [-4.32, 15.30]); // [lat, lng] pour la carte
+    assert.equal(r.steps[1].type, 'turn'); assert.equal(r.steps[1].modifier, 'right'); assert.equal(r.steps[1].name, 'Avenue Kasa-Vubu');
+    await new Promise((ok) => osrm.close(ok)); // OSRM « mort »
+    const dead = await driver.call('GET', '/api/driver/route?from=-4.33,15.31&to=-4.335,15.315');
+    assert.equal(dead.status, 502); assert.match(dead.data.error, /indisponible/);
+  });
   await step('pages web servies', async () => {
-    for (const p of ['/', '/suivi', '/commercant/', '/livreur/', '/admin/', '/agence/', '/vendor/leaflet/leaflet.js']) {
+    for (const p of ['/', '/suivi', '/commercant/', '/livreur/', '/admin/', '/agence/', '/vendor/leaflet/leaflet.js', '/assets/nav.js']) {
       const res = await fetch(base + p);
       assert.equal(res.status, 200, p);
     }
@@ -523,6 +548,6 @@ try {
   console.error('\nÉCHEC :', e.message);
   process.exitCode = 1;
 } finally {
-  server.close();
+  server.close(); osrm.close();
   fs.rmSync(dir, { recursive: true, force: true });
 }

@@ -52,6 +52,40 @@ r.post('/shipments/:t/start', (req, res) => {
   res.json(move(s, 'en_livraison', req.user, pos(req.body)));
 });
 
+// Itinéraire routier pour le guidage dans l'appli (OSRM gratuit, sans clé). Le serveur fait la demande :
+// une seule adresse autorisée par la CSP, et une réponse courte pour le téléphone. Si OSRM ne répond pas : 502,
+// l'appli trace alors une ligne droite et garde Google Maps (la livraison n'est jamais bloquée).
+const routeCache = new Map();
+r.get('/route', limits.route, async (req, res) => {
+  const pt = (v) => { const [lat, lng] = String(v || '').split(',').map(Number); return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null; };
+  const from = pt(req.query.from), to = pt(req.query.to);
+  if (!from || !to) fail(400, 'Positions de départ et d’arrivée obligatoires');
+  const key = [from.lat, from.lng, to.lat, to.lng].map((x) => x.toFixed(4)).join(',');
+  const hit = routeCache.get(key);
+  if (hit && Date.now() - hit.at < 120e3) return res.json(hit.data);
+  const base = (process.env.OSRM_URL || 'https://router.project-osrm.org').replace(/\/+$/, '');
+  let j;
+  try {
+    const r = await fetch(`${base}/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson&steps=true`,
+      { signal: AbortSignal.timeout(8000), headers: { 'user-agent': 'FenixDelivery/1.0' } });
+    j = r.ok ? await r.json() : null;
+  } catch { j = null; }
+  const route = j?.code === 'Ok' && j.routes?.[0];
+  if (!route) return res.status(502).json({ error: 'Itinéraire indisponible pour le moment' }); // l'écran trace alors la ligne droite
+  const data = {
+    distance: route.distance, duration: route.duration,
+    coords: route.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
+    steps: route.legs.flatMap((l) => l.steps).map((s) => ({
+      type: s.maneuver.type, modifier: s.maneuver.modifier || null, exit: s.maneuver.exit || null,
+      name: s.name || s.ref || '', distance: s.distance, duration: s.duration,
+      lat: s.maneuver.location[1], lng: s.maneuver.location[0]
+    }))
+  };
+  routeCache.set(key, { at: Date.now(), data });
+  if (routeCache.size > 500) routeCache.delete(routeCache.keys().next().value);
+  res.json(data);
+});
+
 // Vérifie le vrai contenu du fichier (pas seulement son type annoncé) : JPEG, PNG, WebP ou HEIC.
 function isImage(file) {
   const fd = fs.openSync(file, 'r'); const b = Buffer.alloc(12);

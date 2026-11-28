@@ -9,6 +9,7 @@
     "sync": "node scripts/config.mjs && cap sync android"
   },
   "dependencies": {
+    "@capacitor-community/text-to-speech": "^8.0.2",
     "@capacitor-mlkit/barcode-scanning": "^8.2.2",
     "@capacitor/android": "^8.6.3",
     "@capacitor/core": "^8.6.3",

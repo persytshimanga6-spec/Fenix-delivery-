@@ -26,19 +26,30 @@ header.d{padding:calc(14px + var(--sat)) 16px 14px;display:flex;justify-content:
 #scanBox{background:#000;border-radius:14px;overflow:hidden}
 .net{font-size:12px;padding:4px 10px;border-radius:999px;background:#14532D;color:#BBF7D0;font-weight:700}
 .net.off{background:#7F1D1D;color:#FECACA}
-/* Guidage (comme Yango / Uber) */
-#navView{position:fixed;inset:0;z-index:50;background:var(--bg);display:flex;flex-direction:column}
+/* Guidage v2 (comme Apple Maps / Yango) : carte sombre, proche, qui suit et tourne avec la voiture */
+#navView{position:fixed;inset:0;z-index:50;background:#0B0805;display:flex;flex-direction:column}
 #navView.hidden{display:none}
-.nav-top{background:#F0905A;color:#110B06;padding:calc(12px + var(--sat)) 16px 12px;display:flex;gap:12px;align-items:center}
-.nav-arrow{font-size:34px;line-height:1;width:44px;text-align:center;font-weight:800}
-.nav-text{font:800 20px/1.2 var(--display),system-ui,sans-serif}
-.nav-dist{font:700 14px var(--mono),monospace;opacity:.85;margin-top:2px;text-transform:uppercase;letter-spacing:.05em}
-#navMap{flex:1;min-height:200px}
-.nav-bottom{background:#1A120B;border-top:1px solid #3A2B1D;padding:12px 16px calc(12px + env(safe-area-inset-bottom, 0px));display:flex;flex-direction:column;gap:10px}
-.nav-eta{font:800 18px var(--display),system-ui,sans-serif;color:#F5EDE2}
+.nav-top{background:#F0905A;color:#110B06;padding:calc(12px + var(--sat)) 16px 12px;display:flex;gap:12px;align-items:center;z-index:2}
+.nav-arrow{font-size:38px;line-height:1;width:46px;text-align:center;font-weight:800}
+.nav-dist{font:800 26px/1.1 var(--display),system-ui,sans-serif;font-variant-numeric:tabular-nums}
+.nav-text{font:700 17px/1.25 var(--display),system-ui,sans-serif;margin-top:2px}
+#navWrap{flex:1;position:relative;overflow:hidden;min-height:200px;background:#0B0805}
+#navMap{position:absolute;background:#0B0805;transform-origin:50% 50%;will-change:transform}
+.nav-ctl{position:absolute;right:12px;top:12px;display:flex;flex-direction:column;gap:8px;z-index:500}
+.nav-ctl button,#navRecenter{background:#1A120B;color:#F5EDE2;border:1px solid #3A2B1D;border-radius:12px;min-width:48px;min-height:48px;font:800 22px system-ui;padding:0 12px}
+#navRecenter{position:absolute;left:50%;transform:translateX(-50%);bottom:44px;z-index:500;font:800 16px system-ui;background:#F0905A;color:#110B06;border:0}
+#navRecenter.hidden{display:none}
+.nav-road{position:absolute;left:50%;transform:translateX(-50%);bottom:12px;z-index:400;background:rgba(17,11,6,.85);color:#F5EDE2;font:700 13px system-ui;padding:5px 12px;border-radius:99px;max-width:70%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nav-road:empty{display:none}
+.nav-attr{position:absolute;right:4px;bottom:2px;z-index:400;font:10px system-ui;color:#8A7D6C}
+.nav-attr a{color:#A89A88}
+.nav-bottom{background:#1A120B;border-top:1px solid #3A2B1D;padding:12px 16px calc(12px + env(safe-area-inset-bottom, 0px));display:flex;flex-direction:column;gap:10px;z-index:2}
+.nav-eta{font:800 18px var(--display),system-ui,sans-serif;color:#F5EDE2;font-variant-numeric:tabular-nums}
 .nav-eta small{display:block;font:600 13px system-ui,sans-serif;color:#A89A88;margin-top:2px}
-.nav-warn{background:#3a1d12;color:#F4B683;padding:8px 12px;font-size:13px;border-radius:10px}
-.nav-me{width:18px;height:18px;border-radius:50%;background:#3B82F6;border:3px solid #fff;box-shadow:0 0 0 6px rgba(59,130,246,.25)}
+.nav-warn{position:absolute;left:12px;right:72px;top:12px;z-index:500;background:#3a1d12;color:#F4B683;padding:8px 12px;font-size:13px;border-radius:10px}
+.nav-warn.hidden{display:none}
+.nav-me{width:44px;height:44px;display:flex;align-items:center;justify-content:center;will-change:transform}
+.nav-dest{width:22px;height:22px;border-radius:50%;background:#F0905A;border:4px solid #F5EDE2;box-shadow:0 0 0 6px rgba(240,144,90,.3)}
 </style>
 </head>
 <body>
@@ -118,10 +129,16 @@ header.d{padding:calc(14px + var(--sat)) 16px 14px;display:flex;justify-content:
 </form></dialog>
 
 <div id="navView" class="hidden" aria-live="polite">
-  <div class="nav-top"><div class="nav-arrow" id="navArrow">↑</div><div style="flex:1"><div class="nav-text" id="navText">Calcul de l'itinéraire…</div><div class="nav-dist" id="navDist"></div></div>
-    <button id="navVoice" class="ghost" style="background:#110B06;color:#F5EDE2;border:0" aria-label="Voix">🔊</button></div>
-  <div id="navWarn" class="nav-warn hidden" style="margin:8px 12px 0"></div>
-  <div id="navMap"></div>
+  <div class="nav-top"><div class="nav-arrow" id="navArrow">↑</div><div style="flex:1;min-width:0"><div class="nav-dist" id="navDist"></div><div class="nav-text" id="navText">Calcul de l'itinéraire…</div></div>
+    <button id="navVoice" class="ghost" style="background:#110B06;color:#F5EDE2;border:0;min-width:48px;min-height:48px" aria-label="Voix">🔊</button></div>
+  <div id="navWrap">
+    <div id="navMap"></div>
+    <div id="navWarn" class="nav-warn hidden"></div>
+    <div class="nav-ctl"><button id="navZoomIn" aria-label="Zoomer">+</button><button id="navZoomOut" aria-label="Dézoomer">−</button></div>
+    <button id="navRecenter" class="hidden">Recentrer</button>
+    <div class="nav-road" id="navRoad"></div>
+    <div class="nav-attr">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> © <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a></div>
+  </div>
   <div class="nav-bottom">
     <div class="spread"><div class="nav-eta" id="navEta">—<small id="navWho"></small></div><button id="navClose" aria-label="Fermer le guidage">Fermer</button></div>
     <div class="row" style="gap:8px">
@@ -136,7 +153,7 @@ header.d{padding:calc(14px + var(--sat)) 16px 14px;display:flex;justify-content:
 <script src="/vendor/html5-qrcode/html5-qrcode.min.js"></script>
 <script type="module">
 import { $, $$, api, esc, fc, toast, run, pills, requireLogin, logout, PAY, addTiles } from '/assets/app.js';
-import { createGuide, fmtDist, fmtKm, fmtMin, fmtClock, dist } from '/assets/nav.js';
+import { createGuide, fmtDist, fmtKm, fmtMin, fmtClock, dist, bearing, angleDiff, snap, OFF_ROUTE_M } from '/assets/nav.js';
 const cfg = await api('/api/config');
 $$('[data-company]').forEach((e) => (e.textContent = cfg.company));
 // Dans l'appli mobile « Fenix Livreur » (Capacitor), on utilise le GPS et le scanner du téléphone.
@@ -179,14 +196,14 @@ addEventListener('offline', netState);
 
 // ---------- Position GPS (partagée tant que l'appli est ouverte : sert au suivi et à l'organisation des livreurs) ----------
 async function watchGps() {
-  const onPos = (p) => { if (p?.coords) { pos = { lat: p.coords.latitude, lng: p.coords.longitude }; gpsAt = Date.now(); navOnPos(); } };
+  const onPos = (p) => { if (p?.coords) { pos = { lat: p.coords.latitude, lng: p.coords.longitude }; gpsAt = Date.now(); navOnGps(p.coords); } };
   if (NATIVE && Native.Geolocation) {
     try {
       await Native.Geolocation.requestPermissions();
-      await Native.Geolocation.watchPosition({ enableHighAccuracy: true, maximumAge: 3000 }, (p) => onPos(p));
+      await Native.Geolocation.watchPosition({ enableHighAccuracy: true, maximumAge: 1000 }, (p) => onPos(p));
     } catch { toast('Activez la localisation pour Fenix Livreur', true); }
   } else if (navigator.geolocation) {
-    navigator.geolocation.watchPosition(onPos, () => {}, { enableHighAccuracy: true, maximumAge: 3000 });
+    navigator.geolocation.watchPosition(onPos, () => {}, { enableHighAccuracy: true, maximumAge: 1000 });
   }
   setInterval(() => {
     if (pos.lat && navigator.onLine) api('/api/driver/location', { method: 'POST', body: pos }).catch(() => {});
@@ -255,8 +272,16 @@ $('#list').onclick = run(async (e) => {
   load();
 });
 
-// ---------- Guidage dans Fenix (itinéraire OSRM, instructions en français, voix) ----------
-let gpsAt = 0, navShip = null, navMap = null, navLine = null, navMe = null, navDest = null, navRetry = null, gpsCheck = null;
+// ---------- Guidage dans Fenix v2 (comme Apple Maps / Yango) ----------
+// La carte suit le livreur de près (zoom 17) et tourne avec la voiture ; la flèche reste collée à la ligne.
+// L'itinéraire est recalculé depuis la VRAIE position (toute la carte OSRM) ; la ligne routière ne disparaît jamais.
+const ZOOM = 17, RETRY_MS = 15000, MOVING = 1.4; // 1,4 m/s ≈ 5 km/h
+const MAIN = { color: '#F0905A', weight: 9, opacity: 1, lineCap: 'round', lineJoin: 'round', interactive: false };
+const ALT = { color: '#8A8F98', weight: 5, opacity: 0.75, lineCap: 'round' };
+let gpsAt = 0, gps = null, prevFix = null;
+let navShip = null, navMap = null, mainLine = null, altLines = [], straight = null, meMk = null, arrowEl = null;
+let navRoute = null, alts = [], haveRoad = false, follow = true, routeBusy = false, navRetry = null, gpsCheck = null, raf = 0;
+const anim = { from: null, to: null, cur: null, t0: 0, dur: 1000, heading: 0, arrow: 0, bearingTo: 0, bearing: 0 };
 const ARROW = (t) => /demi-tour/.test(t) ? '↶' : /légèrement à gauche/.test(t) ? '↖' : /légèrement à droite/.test(t) ? '↗' : /gauche/.test(t) ? '←'
   : /droite/.test(t) ? '→' : /rond-point/i.test(t) ? '⟳' : /arrivé/.test(t) ? '◎' : '↑';
 const VKEY = 'fx_voice';
@@ -265,72 +290,186 @@ function say(text) {
   if (NATIVE && Native.TextToSpeech) { Native.TextToSpeech.speak({ text, lang: 'fr-FR', rate: 1.0 }).catch(() => {}); return; }
   try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.lang = 'fr-FR'; speechSynthesis.speak(u); } catch { /* pas de voix */ }
 }
-const guide = createGuide({ speak: say, reroute: (p) => fetchRoute(p) });
+const guide = createGuide({ speak: say, reroute: () => fetchRoute('reroute') });
 try { guide.setVoice(localStorage.getItem(VKEY) !== '0'); } catch { guide.setVoice(true); }
 const voiceBtn = () => { $('#navVoice').textContent = guide.voice ? '🔊' : '🔇'; $('#navVoice').setAttribute('aria-label', guide.voice ? 'Couper la voix' : 'Activer la voix'); };
 $('#navVoice').onclick = () => { guide.setVoice(!guide.voice); try { localStorage.setItem(VKEY, guide.voice ? '1' : '0'); } catch {} voiceBtn(); toast(guide.voice ? 'Voix activée' : 'Voix coupée'); };
 const warn = (t) => { $('#navWarn').textContent = t || ''; $('#navWarn').classList.toggle('hidden', !t); };
+const dest = () => ({ lat: navShip.to_lat, lng: navShip.to_lng });
+const isOpen = () => navShip && !$('#navView').classList.contains('hidden');
 
-let routeBusy = false;
-async function fetchRoute(from) {
+// La carte est un grand carré qui pivote autour de la flèche (placée un peu sous le milieu, pour voir la route devant).
+function layoutMap() {
+  const w = $('#navWrap').clientWidth, h = $('#navWrap').clientHeight, py = h * 0.62;
+  const side = Math.ceil(2 * Math.hypot(w / 2, Math.max(py, h - py)));
+  Object.assign($('#navMap').style, { width: `${side}px`, height: `${side}px`, left: `${w / 2 - side / 2}px`, top: `${py - side / 2}px` });
+  navMap?.invalidateSize({ pan: false });
+}
+addEventListener('resize', () => isOpen() && layoutMap());
+
+// ----- Itinéraire : jamais perdu -----
+async function fetchRoute(reason = 'first') {
   if (!navShip || routeBusy) return;
-  routeBusy = true;
-  clearTimeout(navRetry);
-  const dest = { lat: navShip.to_lat, lng: navShip.to_lng };
+  const from = gps || (pos.lat ? pos : null);
+  if (!from) return;
+  routeBusy = true; clearTimeout(navRetry);
+  const ship = navShip, to = dest();
+  if (haveRoad && reason === 'reroute') warn('Nouvel itinéraire…');
+  const h = gps?.heading != null && gps.speed > MOVING ? `&heading=${Math.round(gps.heading)}` : '';
   try {
-    const r = await api(`/api/driver/route?from=${from.lat},${from.lng}&to=${dest.lat},${dest.lng}`);
-    guide.setRoute(r);
-    navLine?.remove(); navLine = L.polyline(r.coords, { color: '#F0905A', weight: 7, opacity: .95 }).addTo(navMap);
+    const res = await fetch(`/api/driver/route?from=${from.lat},${from.lng}&to=${to.lat},${to.lng}${h}`,
+      { credentials: 'same-origin', signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error(String(res.status));
+    const r = await res.json();
+    if (navShip !== ship) return;
+    applyRoute(r);
     warn('');
-    navOnPos(true);
+    if (gps) navOnGps(null);
   } catch {
-    // Repli : ligne droite + Google Maps ; on réessaie dans une minute. La livraison n'est jamais bloquée.
-    guide.setRoute(null);
-    navLine?.remove(); navLine = L.polyline([[from.lat, from.lng], [dest.lat, dest.lng]], { color: '#F0905A', weight: 4, dashArray: '8 8' }).addTo(navMap);
-    warn('Itinéraire indisponible : ligne droite affichée. Utilisez « Ouvrir dans Google Maps » si besoin.');
-    $('#navArrow').textContent = '↑'; $('#navText').textContent = 'Dirigez-vous vers la destination';
-    $('#navDist').textContent = `à vol d'oiseau : ${fmtKm(dist(from, dest))}`;
-    navRetry = setTimeout(() => pos.lat && fetchRoute(pos), 60000);
+    if (navShip !== ship) return;
+    // Premier calcul raté : ligne droite. Sinon on GARDE l'ancienne route routière (elle mène toujours à destination).
+    if (!haveRoad) drawStraight(from);
+    else warn('Connexion lente : l’itinéraire est gardé, nouvel essai dans 15 s…');
+    navRetry = setTimeout(() => fetchRoute('retry'), RETRY_MS);
   } finally { routeBusy = false; }
 }
-
-function navOnPos(fit = false) {
-  if (!navShip || $('#navView').classList.contains('hidden') || !pos.lat) return;
-  const ll = [pos.lat, pos.lng];
-  if (!navMe) navMe = L.marker(ll, { icon: L.divIcon({ className: '', html: '<div class="nav-me"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }), interactive: false }).addTo(navMap);
-  navMe.setLatLng(ll);
-  if (!guide.route && !navLine) return fetchRoute(pos);
-  if (fit && navLine) navMap.fitBounds(navLine.getBounds(), { padding: [30, 30] }); else navMap.panTo(ll, { animate: true });
-  const g = guide.update(pos);
-  if (!g) return;
-  if (g.arrived) {
-    $('#navArrow').textContent = '◎'; $('#navText').textContent = 'Vous êtes arrivé'; $('#navDist').textContent = 'Demandez le code au client';
-  } else {
-    $('#navArrow').textContent = ARROW(g.text); $('#navText').textContent = g.text; $('#navDist').textContent = fmtDist(g.toTurn);
-  }
-  $('#navEta').firstChild.textContent = `Reste ${fmtKm(g.remaining)} · ${fmtMin(g.remainingS)} · Arrivée ${fmtClock(new Date(Date.now() + g.remainingS * 1000))}`;
-  if (g.rerouting) warn('Nouvel itinéraire…'); else if ($('#navWarn').textContent === 'Nouvel itinéraire…') warn('');
+function applyRoute(r) {
+  navRoute = r; alts = (r.alternatives || []).filter((a) => a?.coords?.length > 1);
+  if (haveRoad) guide.replaceRoute(r); else guide.setRoute(r);
+  haveRoad = true;
+  // La ligne est mise à jour sur place : elle ne disparaît jamais entre l'ancienne et la nouvelle route.
+  if (mainLine) mainLine.setLatLngs(r.coords); else mainLine = L.polyline(r.coords, MAIN).addTo(navMap);
+  straight?.remove(); straight = null;
+  drawAlts();
+}
+function drawAlts() {
+  altLines.forEach((l) => l.remove());
+  altLines = alts.map((a, i) => L.polyline(a.coords, ALT).addTo(navMap).on('click', () => chooseAlt(i)));
+  mainLine?.bringToFront();
+}
+function chooseAlt(i) {
+  const pick = alts[i]; if (!pick) return;
+  alts[i] = { ...navRoute, alternatives: undefined };
+  navRoute = pick; guide.replaceRoute(pick); mainLine.setLatLngs(pick.coords); drawAlts();
+  toast(`Itinéraire choisi : ${fmtKm(pick.distance)} · ${fmtMin(pick.duration)}`);
+  if (gps) navOnGps(null);
+}
+function drawStraight(from) {
+  const ll = [[from.lat, from.lng], [dest().lat, dest().lng]];
+  if (straight) straight.setLatLngs(ll); else straight = L.polyline(ll, { color: '#F0905A', weight: 4, dashArray: '8 10', interactive: false }).addTo(navMap);
+  warn('Itinéraire indisponible : ligne droite affichée. Utilisez « Ouvrir dans Google Maps » si besoin. Nouvel essai dans 15 s.');
+  $('#navArrow').textContent = '↑'; $('#navText').textContent = 'Dirigez-vous vers la destination';
+  $('#navDist').textContent = fmtKm(dist(from, dest())); $('#navRoad').textContent = '';
 }
 
+// ----- Position du livreur -----
+function navOnGps(c) {
+  if (!isOpen()) return;
+  if (c) {
+    const p = { lat: c.latitude, lng: c.longitude }, now = Date.now();
+    let speed = Number.isFinite(c.speed) ? c.speed : null;
+    if (speed === null && prevFix) { const dt = (now - prevFix.at) / 1000; if (dt > 0.2) speed = dist(prevFix, p) / dt; }
+    let heading = Number.isFinite(c.heading) && (speed ?? 0) > MOVING ? c.heading : null;
+    if (heading === null && prevFix && dist(prevFix, p) > 4) heading = bearing(prevFix, p);
+    if (prevFix) anim.dur = Math.max(300, Math.min(1500, now - prevFix.at));
+    prevFix = { ...p, at: now };
+    gps = { ...p, speed: speed ?? 0, heading };
+  }
+  if (!gps) return;
+  if (!haveRoad && !straight) fetchRoute('first');
+  const moving = gps.speed > MOVING;
+  let show = gps, head = gps.heading ?? anim.heading;
+  if (guide.route) {
+    const sn = snap(guide.route, gps);
+    if (sn.off < OFF_ROUTE_M) { show = sn; if (moving || gps.heading == null) head = sn.bearing; } // flèche collée à la ligne
+    if (alts.length && sn.along > 250) { alts = []; drawAlts(); } // les autres routes ne servent qu'au départ
+  }
+  moveTo(show, head, moving);
+  if (!guide.route) { if (straight) drawStraight(gps); return; }
+  const g = guide.update(gps);
+  if (!g) return;
+  if (g.arrived) {
+    $('#navArrow').textContent = '◎'; $('#navDist').textContent = 'Arrivé'; $('#navText').textContent = 'Demandez le code au client';
+  } else {
+    $('#navArrow').textContent = ARROW(g.text); $('#navDist').textContent = fmtDist(g.toTurn); $('#navText').textContent = g.text;
+  }
+  $('#navRoad').textContent = g.road || '';
+  $('#navEta').firstChild.textContent = `${fmtClock(new Date(Date.now() + g.remainingS * 1000))} · ${fmtMin(g.remainingS)} · ${fmtKm(g.remaining)}`;
+  if (g.rerouting) warn('Nouvel itinéraire…');
+}
+
+// ----- Animation : la flèche avance en douceur, la carte suit et tourne -----
+function moveTo(p, head, moving) {
+  anim.from = anim.cur || p; anim.to = { lat: p.lat, lng: p.lng }; anim.t0 = performance.now();
+  anim.heading = head ?? anim.heading;
+  anim.bearingTo = moving ? anim.heading : 0; // à l'arrêt : le nord en haut
+}
+function frame() {
+  if (!isOpen()) return;
+  raf = requestAnimationFrame(frame);
+  if (!anim.to || !navMap) return;
+  const k = Math.min(1, (performance.now() - anim.t0) / anim.dur);
+  anim.cur = { lat: anim.from.lat + (anim.to.lat - anim.from.lat) * k, lng: anim.from.lng + (anim.to.lng - anim.from.lng) * k };
+  anim.bearing = (anim.bearing + angleDiff(anim.bearing, anim.bearingTo) * 0.08 + 360) % 360;
+  anim.arrow = (anim.arrow + angleDiff(anim.arrow, anim.heading) * 0.15 + 360) % 360;
+  const b = follow ? anim.bearing : 0;
+  meMk.setLatLng([anim.cur.lat, anim.cur.lng]);
+  if (arrowEl) arrowEl.style.transform = `rotate(${anim.arrow}deg)`; // la carte tourne déjà de -cap : la flèche pointe vers le haut
+  $('#navMap').style.transform = b ? `rotate(${-b}deg)` : '';
+  if (follow) {
+    const off = navMap.project([anim.cur.lat, anim.cur.lng]).subtract(navMap.project(navMap.getCenter()));
+    if (Math.abs(off.x) >= 1 || Math.abs(off.y) >= 1) navMap.panBy(off, { animate: false });
+  }
+}
+function setFollow(on) {
+  follow = on;
+  $('#navRecenter').classList.toggle('hidden', on);
+  if (on && anim.cur) navMap.setView([anim.cur.lat, anim.cur.lng], ZOOM, { animate: false });
+}
+$('#navRecenter').onclick = () => setFollow(true);
+$('#navZoomIn').onclick = () => navMap?.setZoom(Math.min(19, navMap.getZoom() + 1));
+$('#navZoomOut').onclick = () => navMap?.setZoom(Math.max(11, navMap.getZoom() - 1));
+
+const ME = '<div class="nav-me"><svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17" fill="#3B82F6" stroke="#fff" stroke-width="3"/><path d="M20 8 L29 29 L20 24 L11 29 Z" fill="#fff"/></svg></div>';
 function openGuide(s) {
-  navShip = s; guide.setRoute(null); navLine = null; navMe = null;
-  $('#navView').classList.remove('hidden');
+  navShip = s; navRoute = null; alts = []; haveRoad = false; routeBusy = false; guide.setRoute(null); follow = true; prevFix = null;
+  gps = pos.lat ? { lat: pos.lat, lng: pos.lng, speed: 0, heading: null } : null;
+  $('#navView').classList.remove('hidden'); $('#navRecenter').classList.add('hidden');
   $('#navWho').textContent = `${s.recipient_name} · ${s.to_commune}${s.to_landmark ? ` · ${s.to_landmark}` : ''}`;
   $('#navCall').href = `tel:${s.recipient_phone}`;
   $('#navGmaps').href = nav(s.to_lat, s.to_lng);
-  $('#navText').textContent = 'Calcul de l’itinéraire…'; $('#navDist').textContent = ''; $('#navEta').firstChild.textContent = '—'; warn('');
-  voiceBtn();
-  if (!navMap) { navMap = L.map('navMap', { zoomControl: false }).setView([s.to_lat, s.to_lng], 15); addTiles(navMap); }
-  else { navMap.eachLayer((l) => { if (l instanceof L.Marker || l instanceof L.Polyline) l.remove(); }); navMap.setView([s.to_lat, s.to_lng], 15); }
-  navDest = L.marker([s.to_lat, s.to_lng]).addTo(navMap);
-  setTimeout(() => navMap.invalidateSize(), 50);
-  if (pos.lat) fetchRoute(pos);
+  $('#navText').textContent = 'Calcul de l’itinéraire…'; $('#navDist').textContent = ''; $('#navRoad').textContent = ''; $('#navEta').firstChild.textContent = '—'; warn('');
+  voiceBtn(); layoutMap();
+  const start = gps || dest();
+  if (!navMap) {
+    navMap = L.map('navMap', { zoomControl: false, attributionControl: false, zoomAnimation: false, inertia: false,
+      touchZoom: 'center', scrollWheelZoom: 'center', doubleClickZoom: 'center', maxZoom: 19 });
+    addTiles(navMap, { dark: true });
+    navMap.on('dragstart', () => setFollow(false)); // le livreur bouge la carte : on arrête de suivre, bouton « Recentrer »
+  } else navMap.eachLayer((l) => { if (l instanceof L.Marker || l instanceof L.Polyline) l.remove(); });
+  mainLine = null; altLines = []; straight = null;
+  navMap.setView([start.lat, start.lng], ZOOM, { animate: false }); // centré sur le livreur, zoom proche
+  layoutMap();
+  L.marker([dest().lat, dest().lng], { icon: L.divIcon({ className: '', html: '<div class="nav-dest"></div>', iconSize: [22, 22], iconAnchor: [11, 11] }), interactive: false }).addTo(navMap);
+  meMk = L.marker([start.lat, start.lng], { icon: L.divIcon({ className: '', html: ME, iconSize: [44, 44], iconAnchor: [22, 22] }), interactive: false, zIndexOffset: 1000 }).addTo(navMap);
+  arrowEl = meMk.getElement()?.firstChild || null;
+  Object.assign(anim, { from: start, to: start, cur: start, t0: performance.now(), heading: 0, arrow: 0, bearing: 0, bearingTo: 0 });
+  cancelAnimationFrame(raf); raf = requestAnimationFrame(frame);
+  if (gps) fetchRoute('first');
   clearTimeout(gpsCheck);
   gpsCheck = setTimeout(() => { if (!pos.lat || Date.now() - gpsAt > 60000) warn('GPS indisponible : vérifiez la localisation du téléphone. La carte et Google Maps restent utilisables.'); }, 10000);
 }
-function closeGuide() { $('#navView').classList.add('hidden'); navShip = null; clearTimeout(navRetry); clearTimeout(gpsCheck); try { speechSynthesis.cancel(); } catch {} }
+function closeGuide() { $('#navView').classList.add('hidden'); navShip = null; cancelAnimationFrame(raf); clearTimeout(navRetry); clearTimeout(gpsCheck); $('#navMap').style.transform = ''; try { speechSynthesis.cancel(); } catch {} }
 $('#navClose').onclick = closeGuide;
 $('#navDeliver').onclick = () => { const s = items.find((x) => x.tracking === navShip?.tracking) || navShip; closeGuide(); if (s) openDeliver(s); };
+// Lecture seule, pour les tests automatiques de l'écran (aucune donnée sensible).
+window.__fenixNav = () => ({
+  follow, zoom: navMap?.getZoom(), center: navMap?.getCenter(), me: meMk?.getLatLng(), bearing: follow ? anim.bearing : 0,
+  arrowOnScreen: angleDiff(0, anim.arrow - (follow ? anim.bearing : 0)),
+  rotate: $('#navMap').style.transform, line: mainLine ? mainLine.getLatLngs().length : 0, lineOnMap: !!mainLine && navMap.hasLayer(mainLine),
+  straight: !!straight, alts: altLines.length, haveRoad, dist: $('#navDist').textContent, text: $('#navText').textContent,
+  warn: $('#navWarn').classList.contains('hidden') ? '' : $('#navWarn').textContent, recenter: !$('#navRecenter').classList.contains('hidden')
+});
 
 // ---------- Scan QR (ramassage, ou retrouver un colis) ----------
 let scanner;

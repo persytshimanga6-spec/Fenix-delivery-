@@ -39,8 +39,10 @@ export function instruction(step) {
   }
 }
 
+/** Distance jusqu'au virage, qui défile en direct : 60 m → 40 m → 25 m → 5 m → maintenant. */
 export function fmtDist(m) {
-  if (m < 50) return 'maintenant';
+  if (m < 5) return 'maintenant';
+  if (m < 100) return `dans ${Math.round(m / 5) * 5} m`;
   if (m < 1000) return `dans ${Math.round(m / 10) * 10} m`;
   return `dans ${(m / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} km`;
 }
@@ -59,6 +61,31 @@ export function prepare(route) {
   const scale = acc > 0 ? cum[cum.length - 1] / acc : 1; // aligne les étapes sur la ligne tracée
   steps.forEach((s) => { s.start *= scale; });
   return { pts, cum, steps, total: cum[cum.length - 1], duration: route.duration };
+}
+
+/** Cap (0 = nord, 90 = est) pour aller de a vers b, en degrés. */
+export function bearing(a, b) {
+  const y = Math.sin(rad(b.lng - a.lng)) * Math.cos(rad(b.lat));
+  const x = Math.cos(rad(a.lat)) * Math.sin(rad(b.lat)) - Math.sin(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.cos(rad(b.lng - a.lng));
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+/** Plus petit écart d'angle signé (de a vers b), entre -180 et 180. */
+export const angleDiff = (a, b) => ((((b - a) % 360) + 540) % 360) - 180;
+
+/** Le point de la route situé à `along` mètres du départ, avec le cap de la route à cet endroit. */
+export function pointAt(r, along) {
+  const d = Math.max(0, Math.min(r.total, along));
+  let i = 1;
+  while (i < r.pts.length - 1 && r.cum[i] < d) i++;
+  const a = r.pts[i - 1], b = r.pts[i] || a, seg = r.cum[i] - r.cum[i - 1];
+  const t = seg > 0 ? (d - r.cum[i - 1]) / seg : 0;
+  return { lat: a.lat + (b.lat - a.lat) * t, lng: a.lng + (b.lng - a.lng) * t, bearing: bearing(a, b) };
+}
+
+/** La position GPS « collée » sur la route (pour que la flèche reste sur la ligne), avec l'écart en mètres. */
+export function snap(r, p) {
+  const { off, along } = project(r, p);
+  return { ...pointAt(r, along), off, along };
 }
 
 /** Point le plus proche sur la route : distance à la route et distance déjà parcourue. */
@@ -88,7 +115,7 @@ export function progress(r, p) {
   const leftInCur = curLen > 0 ? Math.max(0, ((r.steps[k + 1]?.start ?? r.total) - along) / curLen) : 0;
   const remainingS = (cur.duration || 0) * leftInCur + r.steps.slice(k + 1).reduce((t, s) => t + (s.duration || 0), 0);
   return {
-    step: k + 1 < r.steps.length ? k + 1 : k, text: next.text, toTurn: Math.max(0, next.start - along),
+    step: k + 1 < r.steps.length ? k + 1 : k, text: next.text, road: cur.type === 'arrive' ? '' : cur.name || '', toTurn: Math.max(0, next.start - along),
     remaining, remainingS, offRoute: off, arrived: remaining < 30
   };
 }
@@ -97,27 +124,37 @@ export function progress(r, p) {
  * Contrôleur du guidage : suit les positions, annonce les instructions (voix), demande un nouvel itinéraire
  * quand le livreur quitte la route. `speak` et `reroute` sont fournis par l'écran (ou par les tests).
  */
+// Hors de la route : plus de 80 m, trois positions de suite (le bruit du GPS en voiture ne déclenche rien).
+export const OFF_ROUTE_M = 80, OFF_ROUTE_COUNT = 3, REROUTE_EVERY_MS = 20000;
 export function createGuide({ speak = () => {}, reroute = () => {}, now = () => Date.now() } = {}) {
-  let route = null, lastStep = -1, nearSaid = -1, offCount = 0, lastReroute = 0, voice = true;
+  let route = null, lastStep = -1, nearSaid = -1, offCount = 0, lastReroute = 0, voice = true, quiet = null;
   return {
     setRoute(r) { route = r ? prepare(r) : null; lastStep = -1; nearSaid = -1; offCount = 0; return route; },
+    /** Nouvel itinéraire après un recalcul : on ne répète pas la consigne si elle n'a pas changé. */
+    replaceRoute(r) {
+      quiet = route && lastStep >= 0 && lastStep !== Infinity ? route.steps[lastStep]?.text : null;
+      route = prepare(r); offCount = 0; nearSaid = -1; lastStep = -1;
+      return route;
+    },
     get route() { return route; },
     get voice() { return voice; },
     setVoice(on) { voice = !!on; },
     update(p) {
       if (!route || !p?.lat) return null;
       const g = progress(route, p);
-      // Hors de la route (plus de 50 m, deux fois de suite) : nouvel itinéraire, au plus toutes les 20 s.
-      offCount = g.offRoute > 50 ? offCount + 1 : 0;
-      if (offCount >= 2 && now() - lastReroute > 20000) { lastReroute = now(); offCount = 0; reroute(p); g.rerouting = true; }
+      // Hors de la route : nouvel itinéraire calculé depuis la vraie position, au plus toutes les 20 s.
+      offCount = g.offRoute > OFF_ROUTE_M ? offCount + 1 : 0;
+      if (offCount >= OFF_ROUTE_COUNT && now() - lastReroute > REROUTE_EVERY_MS) { lastReroute = now(); offCount = 0; reroute(p); g.rerouting = true; }
       if (voice && !g.rerouting) {
         if (g.arrived && lastStep !== Infinity) { speak('Vous êtes arrivé à destination'); lastStep = Infinity; }
+        else if (!g.arrived && g.step !== lastStep && quiet && g.text === quiet) { lastStep = g.step; }
         else if (!g.arrived && g.step !== lastStep) {
           speak(g.toTurn < 60 ? `${g.text} maintenant` : `Dans ${fmtKm(g.toTurn).replace(' m', ' mètres').replace(' km', ' kilomètres')}, ${g.text}`);
           lastStep = g.step; if (g.toTurn < 60) nearSaid = g.step;
         }
         else if (!g.arrived && g.toTurn < 60 && nearSaid !== g.step && g.toTurn >= 0) { speak(`${g.text} maintenant`); nearSaid = g.step; }
       } else if (!voice) { lastStep = g.arrived ? Infinity : g.step; }
+      quiet = null;
       return g;
     }
   };

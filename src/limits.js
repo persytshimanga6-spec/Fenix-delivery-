@@ -18,7 +18,7 @@ export const limits = {
   pay: limiter(60 * 60e3, 20, WAIT60, ipKey),
   publicRead: limiter(60 * 60e3, 30, WAIT60, ipKey),
   quote: limiter(60e3, 60, 'Trop de demandes. Réessayez dans une minute.', ipKey),
-  route: limiter(60 * 60e3, 120, WAIT60, (req) => `route:${req.user?.id || ipKey(req)}`),
+  route: limiter(60 * 60e3, 600, WAIT60, (req) => `route:${req.user?.id || ipKey(req)}`),
   deliver: limiter(60 * 60e3, 20, WAIT60, (req) => `livreur:${req.user?.id || ipKey(req)}`),
   resend: limiter(60 * 60e3, 10, WAIT60, (req) => `admin:${req.user?.id || ipKey(req)}`)
 };

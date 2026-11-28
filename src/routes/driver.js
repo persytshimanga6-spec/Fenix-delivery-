@@ -54,33 +54,45 @@ r.post('/shipments/:t/start', (req, res) => {
 
 // Itinéraire routier pour le guidage dans l'appli (OSRM gratuit, sans clé). Le serveur fait la demande :
 // une seule adresse autorisée par la CSP, et une réponse courte pour le téléphone. Si OSRM ne répond pas : 502,
-// l'appli trace alors une ligne droite et garde Google Maps (la livraison n'est jamais bloquée).
+// l'appli garde l'ancienne route (ou trace une ligne droite s'il n'y en a jamais eu) et garde Google Maps.
 const routeCache = new Map();
+// OSRM travaille sur TOUTE la carte routière (OpenStreetMap) : chaque calcul part de la vraie position du livreur,
+// quelle que soit la rue qu'il a prise. `heading` (cap en degrés) évite de proposer un demi-tour inutile.
+const shapeRoute = (route) => ({
+  distance: route.distance, duration: route.duration,
+  coords: route.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
+  steps: route.legs.flatMap((l) => l.steps).map((s) => ({
+    type: s.maneuver.type, modifier: s.maneuver.modifier || null, exit: s.maneuver.exit || null,
+    name: s.name || s.ref || '', distance: s.distance, duration: s.duration,
+    lat: s.maneuver.location[1], lng: s.maneuver.location[0]
+  }))
+});
+async function osrm(url) {
+  for (let i = 0; i < 2; i++) { // un deuxième essai tout de suite : une coupure d'une seconde ne fait rien perdre
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(6000), headers: { 'user-agent': 'FenixDelivery/1.0' } });
+      const j = r.ok ? await r.json() : null;
+      if (j?.code === 'Ok' && j.routes?.length) return j;
+    } catch { /* on réessaie */ }
+  }
+  return null;
+}
 r.get('/route', limits.route, async (req, res) => {
   const pt = (v) => { const [lat, lng] = String(v || '').split(',').map(Number); return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null; };
   const from = pt(req.query.from), to = pt(req.query.to);
   if (!from || !to) fail(400, 'Positions de départ et d’arrivée obligatoires');
-  const key = [from.lat, from.lng, to.lat, to.lng].map((x) => x.toFixed(4)).join(',');
+  const h = Number(req.query.heading);
+  const heading = req.query.heading !== undefined && Number.isFinite(h) && h >= 0 && h < 360 ? Math.round(h) : null;
+  const key = [from.lat, from.lng, to.lat, to.lng].map((x) => x.toFixed(4)).join(',') + `|${heading ?? ''}`;
   const hit = routeCache.get(key);
   if (hit && Date.now() - hit.at < 120e3) return res.json(hit.data);
   const base = (process.env.OSRM_URL || 'https://router.project-osrm.org').replace(/\/+$/, '');
-  let j;
-  try {
-    const r = await fetch(`${base}/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson&steps=true`,
-      { signal: AbortSignal.timeout(8000), headers: { 'user-agent': 'FenixDelivery/1.0' } });
-    j = r.ok ? await r.json() : null;
-  } catch { j = null; }
-  const route = j?.code === 'Ok' && j.routes?.[0];
-  if (!route) return res.status(502).json({ error: 'Itinéraire indisponible pour le moment' }); // l'écran trace alors la ligne droite
-  const data = {
-    distance: route.distance, duration: route.duration,
-    coords: route.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
-    steps: route.legs.flatMap((l) => l.steps).map((s) => ({
-      type: s.maneuver.type, modifier: s.maneuver.modifier || null, exit: s.maneuver.exit || null,
-      name: s.name || s.ref || '', distance: s.distance, duration: s.duration,
-      lat: s.maneuver.location[1], lng: s.maneuver.location[0]
-    }))
-  };
+  const bearings = heading === null ? '' : `&bearings=${heading},60;`;
+  let j = await osrm(`${base}/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson&steps=true&alternatives=true${bearings}`);
+  if (!j && bearings) j = await osrm(`${base}/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson&steps=true&alternatives=true`);
+  if (!j) return res.status(502).json({ error: 'Itinéraire indisponible pour le moment' }); // l'écran garde l'ancienne route
+  const [main, ...alts] = j.routes.map(shapeRoute);
+  const data = { ...main, alternatives: alts.slice(0, 2) };
   routeCache.set(key, { at: Date.now(), data });
   if (routeCache.size > 500) routeCache.delete(routeCache.keys().next().value);
   res.json(data);

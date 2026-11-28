@@ -139,13 +139,13 @@ export function quoteLines(q) {
 // Tuiles CARTO (Positron, rendu clair) : les serveurs bénévoles d'OpenStreetMap refusent les applis (erreur 403).
 // La clé gratuite CARTO se règle dans Back office › Tarifs et réglages (gratuit jusqu'à 1 million de tuiles par mois).
 let tileCfg;
-export function addTiles(map) {
+export function addTiles(map, { dark = false } = {}) {
   tileCfg ??= api('/api/config').then((c) => c.map).catch(() => null);
   tileCfg.then((m) => {
-    const key = m?.carto_key;
+    const key = m?.carto_key, style = dark ? 'dark_all' : 'light_all';
     const url = key
-      ? `https://basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}{r}.png?key=${encodeURIComponent(key)}`
-      : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+      ? `https://basemaps.cartocdn.com/rastertiles/${style}/{z}/{x}/{y}{r}.png?key=${encodeURIComponent(key)}`
+      : `https://{s}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}{r}.png`;
     L.tileLayer(url, { maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>' }).addTo(map);
   });
 }

@@ -7,7 +7,9 @@ import assert from 'node:assert/strict';
 
 // Faux serveur OSRM (itinéraires) : aucun appel Internet pendant les tests.
 import http from 'node:http';
+const osrmUrls = [];
 const osrm = http.createServer((req, res) => {
+  osrmUrls.push(req.url);
   res.setHeader('content-type', 'application/json');
   res.end(JSON.stringify({ code: 'Ok', routes: [{ distance: 1200, duration: 300,
     geometry: { coordinates: [[15.30, -4.32], [15.305, -4.32], [15.305, -4.325]] },
@@ -531,6 +533,10 @@ try {
     const r = await driver.ok('GET', '/api/driver/route?from=-4.32,15.30&to=-4.325,15.305');
     assert.equal(r.distance, 1200); assert.equal(r.coords.length, 3);
     assert.deepEqual(r.coords[0], [-4.32, 15.30]); // [lat, lng] pour la carte
+    assert.ok(Array.isArray(r.alternatives));
+    assert.match(osrmUrls.at(-1), /alternatives=true/);
+    await driver.ok('GET', '/api/driver/route?from=-4.3201,15.3001&to=-4.325,15.305&heading=95');
+    assert.match(osrmUrls.at(-1), /bearings=95,60;/); // le cap du livreur : pas de demi-tour inutile
     assert.equal(r.steps[1].type, 'turn'); assert.equal(r.steps[1].modifier, 'right'); assert.equal(r.steps[1].name, 'Avenue Kasa-Vubu');
     await new Promise((ok) => osrm.close(ok)); // OSRM « mort »
     const dead = await driver.call('GET', '/api/driver/route?from=-4.33,15.31&to=-4.335,15.315');

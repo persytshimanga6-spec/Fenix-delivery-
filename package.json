@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "seed": "node src/seed.js",
-    "test": "node test/e2e.js && node test/sms.js && node test/nav.js"
+    "test": "node test/e2e.js && node test/sms.js && node test/nav.js && node test/ui-nav.mjs"
   },
   "author": "",
   "license": "ISC",

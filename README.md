@@ -162,6 +162,31 @@ L'appli mobile est **la même appli livreur** que `/livreur/`, mise dans une vra
 - **Vrais SMS** : choisis un fournisseur qui couvre la RDC et mets son adresse dans `SMS_WEBHOOK_URL`. Le système envoie `{"to": "...", "message": "..."}`. Si le fournisseur attend un autre format, il faut un petit adaptateur.
 - **Vrais e-mails** : remplis `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`. Exemple Gmail : `smtp.gmail.com`, port `465`, ton adresse Gmail et un **mot de passe d'application** (Compte Google › Sécurité › Validation en 2 étapes › Mots de passe des applications). Gmail suffit pour commencer (limite d'environ 500 e-mails par jour).
 
+
+### Vrais SMS avec Twilio (adaptateur `sms-adapter/`)
+
+Fenix envoie `POST {"to","message"}` à `SMS_WEBHOOK_URL`. L'adaptateur met le numéro au format `+243…` et appelle Twilio. Il enlève aussi les accents (`SMS_ASCII=1`) pour qu'un SMS tienne en 160 caractères : c'est moins cher.
+
+**Chez Twilio (une fois)**
+1. Compte en *pay-as-you-go*, avec du crédit.
+2. *Messaging › Settings › Geo permissions* : cocher **Congo (DRC)**.
+3. Expéditeur : un nom comme `FENIX`. Twilio conseille un nom alphanumérique pour la RDC, car les numéros n'arrivent pas chez Airtel. Chez Vodacom, le nom doit être **enregistré**.
+
+**Sur le serveur**
+```
+cd /opt/fenix
+cp sms-adapter/sms.env.example sms.env && chmod 600 sms.env
+TOKEN=$(openssl rand -hex 24)
+nano sms.env        # TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM=FENIX, SMS_WEBHOOK_TOKEN=$TOKEN
+# dans /opt/fenix/.env :  SMS_WEBHOOK_URL=http://fenix-sms:3001/send   et   SMS_WEBHOOK_TOKEN=(le même jeton)
+docker compose -f deploy/docker-compose.sms.yml up -d --build     # démarre l'adaptateur (redémarre tout seul)
+bash deploy/install-shared.sh                                       # recrée Fenix avec la nouvelle configuration
+```
+- L'adaptateur n'a **aucun port publié**. Fenix le joint par son réseau Docker privé (`fenix-sms:3001`).
+- Journal : `docker logs -f fenix-sms`. Le texte des SMS n'y est jamais écrit.
+- Arrêt : `docker compose -f deploy/docker-compose.sms.yml down`.
+- Les clés Twilio sont seulement dans `/opt/fenix/sms.env`, que Git ignore.
+
 ## 7. Appli livreur
 
 - Sur Android, ouvre `/livreur/` dans Chrome, puis menu › **Ajouter à l'écran d'accueil** : elle s'ouvre comme une appli.

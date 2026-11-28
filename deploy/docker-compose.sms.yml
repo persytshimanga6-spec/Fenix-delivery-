@@ -1,0 +1,16 @@
+# Adaptateur SMS Fenix → Twilio. Aucun port publié : Fenix le joint par le réseau Docker privé de Fenix.
+# Démarrer : docker compose -f deploy/docker-compose.sms.yml up -d --build
+# Journal   : docker logs -f fenix-sms        Arrêter : docker compose -f deploy/docker-compose.sms.yml down
+name: fenix-sms
+services:
+  fenix-sms:
+    build: ../sms-adapter
+    container_name: fenix-sms
+    restart: unless-stopped
+    env_file: ../sms.env
+    mem_limit: 64m
+    networks: [fenix-net]
+networks:
+  fenix-net:
+    external: true
+    name: fenix_fenix-net

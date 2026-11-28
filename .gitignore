@@ -3,3 +3,4 @@ data/
 .env
 .admin-password
 deploy/Caddyfile
+sms.env

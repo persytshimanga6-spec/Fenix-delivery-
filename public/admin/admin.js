@@ -353,6 +353,10 @@ const pages = {
           <select id="tSize"><option>petit</option><option>moyen</option><option>grand</option></select><button type="button" id="tGo">Calculer</button></div>
           <div id="tOut" class="small" style="margin-top:8px"></div><p class="tiny muted" style="margin:6px 0 0">Enregistrez d'abord pour essayer les nouveaux réglages.</p></div>
       </div>
+      <div class="card stack"><div class="spread"><h2 style="margin:0">E-mail automatique</h2>
+          <span class="chip" style="${t.email_configured ? '' : 'background:#3a1d12;color:#F4B683'}">E-mail : ${t.email_configured ? 'configuré' : 'non configuré'}</span></div>
+        <p class="muted small" style="margin:0">${t.email_configured ? 'Les e-mails (code de livraison, confirmations) partent automatiquement.'
+          : 'Les e-mails sont seulement enregistrés dans Notifications. Le compte d’envoi (SMTP) se règle sur le serveur, dans /opt/fenix/.env.'}</p></div>
       <div class="card stack"><h2>Carte</h2>
         <p class="muted small" style="margin:0">Fond de carte CARTO. Demandez une clé gratuite sur carto.com/basemaps/apikey (usage commercial gratuit jusqu'à 1 million de tuiles par mois), puis collez-la ici.</p>
         <div class="grid">${field('carto_api_key', 'Clé CARTO (fond de carte)', 'type="text" autocomplete="off"')}</div></div>

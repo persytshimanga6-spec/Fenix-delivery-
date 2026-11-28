@@ -28,13 +28,22 @@ export const mustGet = (t) => getByTracking(t) || fail(404, 'Colis introuvable')
  * Sinon le paiement est « en attente » jusqu'à ce qu'un comptoir ou le siège le confirme ;
  * en attendant, aucun livreur ne peut le prendre et il ne peut pas partir.
  */
+// Nom complet affiché partout : « Prénom Nom Post-nom ».
+export const composeName = (p) => [p.prenom, p.nom, p.postnom].filter(Boolean).join(' ');
+const nameParts = (input, who) => ({
+  nom: str(input[`${who}_nom`], 60), postnom: str(input[`${who}_postnom`], 60), prenom: str(input[`${who}_prenom`], 60)
+});
+
 export async function createShipment(input, actor, ctx = {}) {
+  const parts = { sender: nameParts(input, 'sender'), recipient: nameParts(input, 'recipient') };
   const d = {
     sender_name: str(input.sender_name), sender_phone: normPhone(input.sender_phone),
     from_commune: str(input.from_commune), from_landmark: str(input.from_landmark, 300),
     from_lat: num(input.from_lat), from_lng: num(input.from_lng),
     recipient_name: str(input.recipient_name), recipient_phone: normPhone(input.recipient_phone),
     recipient_email: email(input.recipient_email), sender_email: email(input.sender_email),
+    sender_nom: parts.sender.nom, sender_postnom: parts.sender.postnom, sender_prenom: parts.sender.prenom,
+    recipient_nom: parts.recipient.nom, recipient_postnom: parts.recipient.postnom, recipient_prenom: parts.recipient.prenom,
     to_commune: str(input.to_commune), to_landmark: str(input.to_landmark, 300),
     to_lat: num(input.to_lat), to_lng: num(input.to_lng),
     size: str(input.size), weight_kg: num(input.weight_kg), description: str(input.description, 300),
@@ -42,6 +51,9 @@ export async function createShipment(input, actor, ctx = {}) {
     cod_amount_fc: int(input.cod_amount_fc), pay_method: str(input.pay_method), payment_ref: str(input.payment_ref, 60),
     pickup_agency_id: num(input.pickup_agency_id)
   };
+  // Si nom / post-nom / prénom sont donnés, le nom complet est composé « Prénom Nom Post-nom ».
+  if (parts.sender.nom || parts.sender.prenom) d.sender_name = composeName(parts.sender);
+  if (parts.recipient.nom || parts.recipient.prenom) d.recipient_name = composeName(parts.recipient);
 
   const role = actor?.role || 'public';
 
@@ -66,6 +78,15 @@ export async function createShipment(input, actor, ctx = {}) {
     d.merchant_id = m.id;
   } else if (ctx.public) {
     d.merchant_id = null;
+    // Réservation en ligne : nom, post-nom et prénom obligatoires des deux côtés ; e-mail du destinataire obligatoire
+    // (il reçoit le code de livraison), e-mail de l'expéditeur facultatif mais valide s'il est donné.
+    for (const [who, label] of [['sender', 'l’expéditeur'], ['recipient', 'du destinataire']]) {
+      for (const [k, l] of [['nom', 'Nom'], ['postnom', 'Post-nom'], ['prenom', 'Prénom']]) {
+        if (!parts[who][k]) fail(400, `${l} ${who === 'sender' ? 'de l’expéditeur' : label} obligatoire`);
+      }
+    }
+    if (!input.recipient_email || !isEmail(input.recipient_email)) fail(400, 'E-mail du destinataire obligatoire et valide : il reçoit le code de livraison');
+    if (input.sender_email && !isEmail(input.sender_email)) fail(400, 'E-mail de l’expéditeur invalide');
     if (!PAY_METHODS.includes(d.pay_method)) fail(400, 'Choisissez le moyen de paiement');
     if (MOBILE.includes(d.pay_method) && (!d.payment_ref || d.payment_ref.length < 4)) fail(400, 'Entrez la référence de la transaction Mobile Money');
 
@@ -114,10 +135,12 @@ export async function createShipment(input, actor, ctx = {}) {
   const id = tx(() => {
     const r = db.prepare(`INSERT INTO shipments (tracking, merchant_id, agency_id, pickup_agency_id, sender_name, sender_phone,
       from_commune, from_landmark, from_lat, from_lng, recipient_name, recipient_phone, recipient_email, sender_email, to_commune, to_landmark, to_lat, to_lng,
+      sender_nom, sender_postnom, sender_prenom, recipient_nom, recipient_postnom, recipient_prenom,
       size, weight_kg, description, declared_value_fc, insured, express, zone, price_fc, pay_method, shipping_paid, cod_amount_fc,
       status, otp_hash, otp_salt, otp_created_at, payment_status, payment_ref, paid_at)
       VALUES (@tracking, @merchant_id, @agency_id, @pickup_agency_id, @sender_name, @sender_phone, @from_commune, @from_landmark,
-      @from_lat, @from_lng, @recipient_name, @recipient_phone, @recipient_email, @sender_email, @to_commune, @to_landmark, @to_lat, @to_lng, @size, @weight_kg,
+      @from_lat, @from_lng, @recipient_name, @recipient_phone, @recipient_email, @sender_email, @to_commune, @to_landmark, @to_lat, @to_lng,
+      @sender_nom, @sender_postnom, @sender_prenom, @recipient_nom, @recipient_postnom, @recipient_prenom, @size, @weight_kg,
       @description, @declared_value_fc, @insured, @express, @zone, @price_fc, @pay_method, @shipping_paid, @cod_amount_fc,
       'cree', @otp_hash, @otp_salt, @otp_created_at, @payment_status, @payment_ref, @paid_at)`).run({
       ...d, agency_id: d.agency_id ?? null, merchant_id: d.merchant_id ?? null, tracking, zone: q.zone,

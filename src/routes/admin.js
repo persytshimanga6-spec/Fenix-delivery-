@@ -167,7 +167,9 @@ r.post('/merchants/:id/settle-shipping', (req, res) => {
 r.get('/rates', (_req, res) => res.json({
   rates: db.prepare('SELECT * FROM rates ORDER BY zone, CASE size WHEN \'petit\' THEN 0 WHEN \'moyen\' THEN 1 ELSE 2 END').all(),
   settings: Object.fromEntries(db.prepare("SELECT key, value FROM settings WHERE key != 'jwt_secret'").all().map((x) => [x.key, x.value])),
-  communes: db.prepare('SELECT * FROM communes ORDER BY secteur, name').all()
+  communes: db.prepare('SELECT * FROM communes ORDER BY secteur, name').all(),
+  // Voyant seulement : aucun identifiant ni mot de passe SMTP n'est jamais renvoyé.
+  email_configured: !!process.env.SMTP_HOST
 }));
 r.put('/rates', (req, res) => {
   tx(() => {

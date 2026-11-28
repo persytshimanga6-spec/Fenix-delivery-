@@ -18,7 +18,7 @@ if (process.env.SMTP_HOST) {
   });
 }
 
-// Le code de livraison n'est JAMAIS gardé en clair (journal, base) : seul le SMS envoyé le contient.
+// Le code de livraison n'est JAMAIS gardé en clair (journal, base) : seuls le SMS et l'e-mail envoyés au destinataire le contiennent.
 export const maskCodes = (t) => String(t ?? '').replace(/(code de livraison[^:\n]*:\s*)\d{4}/gi, '$1••••');
 
 function record(channel, to, subject, message, meta, status, error = null) {

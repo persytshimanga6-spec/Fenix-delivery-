@@ -216,6 +216,8 @@ db.exec(`UPDATE users SET active = 0 WHERE role = 'commercant' AND active = 1
 db.exec(`DELETE FROM settings WHERE key IN ('pricing_mode','km_fc','surge_on','busy_score','very_busy_score','busy_pct',
   'very_busy_pct','traffic_hours','traffic_pct','surge_max_pct','cod_fee_pct','driver_share_pct')`);
 addColumn('shipments', 'sender_email', 'TEXT');
+// Nom, post-nom et prénom séparés (réservation en ligne). sender_name / recipient_name gardent le nom complet.
+for (const who of ['sender', 'recipient']) for (const part of ['nom', 'postnom', 'prenom']) addColumn('shipments', `${who}_${part}`, 'TEXT');
 
 export const setting = (key, fallback = null) => {
   const r = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);

@@ -255,13 +255,31 @@ try {
   });
   let pubMomo, pubCash, s5Price;
   await step('réservation en ligne : payée avant le départ (Mobile Money, puis espèces au comptoir)', async () => {
-    const book = { sender_name: 'Rachel', sender_phone: '0817777777', from_commune: 'Lemba', from_landmark: 'Arrêt Righini',
-      recipient_name: 'Paul', recipient_phone: '0818888888', to_commune: 'Gombe', to_landmark: 'Boulevard du 30 juin', to_lat: -4.31, to_lng: 15.3, size: 'petit' };
+    const book = { sender_nom: 'Tshimanga', sender_postnom: 'Tshimena', sender_prenom: 'Persy', sender_phone: '0817777777',
+      from_commune: 'Lemba', from_landmark: 'Arrêt Righini',
+      recipient_nom: 'Kabila', recipient_postnom: 'Mbuyi', recipient_prenom: 'Paul', recipient_phone: '0818888888', recipient_email: 'Paul@Exemple.com',
+      to_commune: 'Gombe', to_landmark: 'Boulevard du 30 juin', to_lat: -4.31, to_lng: 15.3, size: 'petit' };
+    // Nom, post-nom, prénom et e-mail du destinataire obligatoires ; e-mail de l'expéditeur valide s'il est donné.
+    for (const k of ['sender_nom', 'sender_postnom', 'sender_prenom', 'recipient_nom', 'recipient_postnom', 'recipient_prenom', 'recipient_email']) {
+      const { [k]: _, ...missing } = book;
+      assert.equal((await pub.call('POST', '/api/book', { ...missing, pay_method: 'orange', payment_ref: 'OM-1234' })).status, 400, k);
+    }
+    assert.equal((await pub.call('POST', '/api/book', { ...book, recipient_email: 'pas-un-email', pay_method: 'orange', payment_ref: 'OM-1234' })).status, 400);
+    assert.equal((await pub.call('POST', '/api/book', { ...book, sender_email: 'faux@', pay_method: 'orange', payment_ref: 'OM-1234' })).status, 400);
     assert.equal((await pub.call('POST', '/api/book', { ...book, pay_method: 'compte' })).status, 400);
     assert.equal((await pub.call('POST', '/api/book', { ...book, pay_method: 'orange' })).status, 400); // référence obligatoire
     pubMomo = await pub.ok('POST', '/api/book', { ...book, pay_method: 'orange', payment_ref: 'OM-55443322' });
     assert.match(pubMomo.tracking, /^FX-/); assert.equal(pubMomo.otp, undefined); // le code part seulement par SMS au destinataire
     assert.ok(!pubMomo.quote.lines.some((l) => /Carburant|Trafic/.test(l.label)));
+    const det = await admin.ok('GET', `/api/admin/shipments/${pubMomo.tracking}`);
+    const sh = det.shipment || det;
+    assert.equal(sh.sender_name, 'Persy Tshimanga Tshimena'); assert.equal(sh.recipient_name, 'Paul Kabila Mbuyi'); // « Prénom Nom Post-nom »
+    assert.deepEqual([sh.sender_nom, sh.sender_postnom, sh.sender_prenom, sh.recipient_nom, sh.recipient_postnom, sh.recipient_prenom],
+      ['Tshimanga', 'Tshimena', 'Persy', 'Kabila', 'Mbuyi', 'Paul']);
+    const mails = await admin.ok('GET', '/api/admin/notifications?channel=email');
+    assert.ok(mails.some((m) => m.to_addr === 'paul@exemple.com' && m.tracking === pubMomo.tracking && m.message.includes('Code de livraison : ••••')),
+      'le code part par e-mail au destinataire (masqué dans le journal)');
+    assert.equal((await admin.ok('GET', '/api/admin/rates')).email_configured, false);
     assert.equal(pubMomo.payment_status, 'en_attente');
     assert.equal((await admin.call('POST', `/api/admin/shipments/${pubMomo.tracking}/assign`, { driver_id: gm.id })).status, 402);
     await agent.ok('POST', `/api/agency/shipments/${pubMomo.tracking}/confirm-payment`, { method: 'orange' });

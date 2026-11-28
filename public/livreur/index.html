@@ -33,8 +33,14 @@ header.d{padding:calc(14px + var(--sat)) 16px 14px;display:flex;justify-content:
 .nav-arrow{font-size:38px;line-height:1;width:46px;text-align:center;font-weight:800}
 .nav-dist{font:800 26px/1.1 var(--display),system-ui,sans-serif;font-variant-numeric:tabular-nums}
 .nav-text{font:700 17px/1.25 var(--display),system-ui,sans-serif;margin-top:2px}
-#navWrap{flex:1;position:relative;overflow:hidden;min-height:200px;background:#0B0805}
-#navMap{position:absolute;background:#0B0805;transform-origin:50% 50%;will-change:transform}
+#navWrap{flex:1;position:relative;overflow:hidden;min-height:200px;background:#CFE6F7}
+#navMap{position:absolute;background:#CFE6F7;transform-origin:50% 50%;will-change:transform}
+/* Jour : carte claire et lumineuse. Nuit : bleu de nuit, luminosité baissée. La route orange reste bien visible. */
+#navWrap.day .leaflet-tile-pane{filter:saturate(1.15) brightness(1.03)}
+#navWrap.night,#navWrap.night #navMap{background:#0A1628}
+#navWrap.night .leaflet-tile-pane{filter:sepia(.35) hue-rotate(185deg) saturate(1.6) brightness(.8)}
+#navWrap.day .nav-road{background:rgba(255,255,255,.92);color:#1A120B;box-shadow:0 1px 4px rgba(0,0,0,.2)}
+#navWrap.day .nav-attr{color:#4B5563}#navWrap.day .nav-attr a{color:#374151}
 .nav-ctl{position:absolute;right:12px;top:12px;display:flex;flex-direction:column;gap:8px;z-index:500}
 .nav-ctl button,#navRecenter{background:#1A120B;color:#F5EDE2;border:1px solid #3A2B1D;border-radius:12px;min-width:48px;min-height:48px;font:800 22px system-ui;padding:0 12px}
 #navRecenter{position:absolute;left:50%;transform:translateX(-50%);bottom:44px;z-index:500;font:800 16px system-ui;background:#F0905A;color:#110B06;border:0}
@@ -131,7 +137,7 @@ header.d{padding:calc(14px + var(--sat)) 16px 14px;display:flex;justify-content:
 <div id="navView" class="hidden" aria-live="polite">
   <div class="nav-top"><div class="nav-arrow" id="navArrow">↑</div><div style="flex:1;min-width:0"><div class="nav-dist" id="navDist"></div><div class="nav-text" id="navText">Calcul de l'itinéraire…</div></div>
     <button id="navVoice" class="ghost" style="background:#110B06;color:#F5EDE2;border:0;min-width:48px;min-height:48px" aria-label="Voix">🔊</button></div>
-  <div id="navWrap">
+  <div id="navWrap" class="day">
     <div id="navMap"></div>
     <div id="navWarn" class="nav-warn hidden"></div>
     <div class="nav-ctl"><button id="navZoomIn" aria-label="Zoomer">+</button><button id="navZoomOut" aria-label="Dézoomer">−</button></div>
@@ -153,7 +159,7 @@ header.d{padding:calc(14px + var(--sat)) 16px 14px;display:flex;justify-content:
 <script src="/vendor/html5-qrcode/html5-qrcode.min.js"></script>
 <script type="module">
 import { $, $$, api, esc, fc, toast, run, pills, requireLogin, logout, PAY, addTiles } from '/assets/app.js';
-import { createGuide, fmtDist, fmtKm, fmtMin, fmtClock, dist, bearing, angleDiff, snap, OFF_ROUTE_M } from '/assets/nav.js';
+import { createGuide, fmtDist, fmtKm, fmtMin, fmtClock, dist, bearing, angleDiff, snap, isNight, OFF_ROUTE_M } from '/assets/nav.js';
 const cfg = await api('/api/config');
 $$('[data-company]').forEach((e) => (e.textContent = cfg.company));
 // Dans l'appli mobile « Fenix Livreur » (Capacitor), on utilise le GPS et le scanner du téléphone.
@@ -281,6 +287,7 @@ const ALT = { color: '#8A8F98', weight: 5, opacity: 0.75, lineCap: 'round' };
 let gpsAt = 0, gps = null, prevFix = null;
 let navShip = null, navMap = null, mainLine = null, altLines = [], straight = null, meMk = null, arrowEl = null;
 let navRoute = null, alts = [], haveRoad = false, follow = true, routeBusy = false, navRetry = null, gpsCheck = null, raf = 0;
+let tiles = null, theme = null, themeTimer = null;
 const anim = { from: null, to: null, cur: null, t0: 0, dur: 1000, heading: 0, arrow: 0, bearingTo: 0, bearing: 0 };
 const ARROW = (t) => /demi-tour/.test(t) ? '↶' : /légèrement à gauche/.test(t) ? '↖' : /légèrement à droite/.test(t) ? '↗' : /gauche/.test(t) ? '←'
   : /droite/.test(t) ? '→' : /rond-point/i.test(t) ? '⟳' : /arrivé/.test(t) ? '◎' : '↑';
@@ -306,6 +313,19 @@ function layoutMap() {
   navMap?.invalidateSize({ pan: false });
 }
 addEventListener('resize', () => isOpen() && layoutMap());
+
+// ----- Jour / nuit automatique (selon le soleil à la position du livreur, sinon l'heure du téléphone) -----
+async function applyTheme() {
+  if (!navMap) return;
+  const want = isNight(new Date(), gps || (pos.lat ? pos : null)) ? 'night' : 'day';
+  if (want === theme) return;
+  theme = want;
+  $('#navWrap').classList.toggle('night', want === 'night'); $('#navWrap').classList.toggle('day', want === 'day');
+  const old = tiles;
+  tiles = await addTiles(navMap, { dark: want === 'night' });
+  old?.remove(); // la nouvelle carte est posée avant d'enlever l'ancienne : pas d'écran vide
+  tiles?.bringToBack();
+}
 
 // ----- Itinéraire : jamais perdu -----
 async function fetchRoute(reason = 'first') {
@@ -444,10 +464,10 @@ function openGuide(s) {
   if (!navMap) {
     navMap = L.map('navMap', { zoomControl: false, attributionControl: false, zoomAnimation: false, inertia: false,
       touchZoom: 'center', scrollWheelZoom: 'center', doubleClickZoom: 'center', maxZoom: 19 });
-    addTiles(navMap, { dark: true });
     navMap.on('dragstart', () => setFollow(false)); // le livreur bouge la carte : on arrête de suivre, bouton « Recentrer »
   } else navMap.eachLayer((l) => { if (l instanceof L.Marker || l instanceof L.Polyline) l.remove(); });
   mainLine = null; altLines = []; straight = null;
+  theme = null; applyTheme(); clearInterval(themeTimer); themeTimer = setInterval(applyTheme, 60000);
   navMap.setView([start.lat, start.lng], ZOOM, { animate: false }); // centré sur le livreur, zoom proche
   layoutMap();
   L.marker([dest().lat, dest().lng], { icon: L.divIcon({ className: '', html: '<div class="nav-dest"></div>', iconSize: [22, 22], iconAnchor: [11, 11] }), interactive: false }).addTo(navMap);
@@ -459,14 +479,14 @@ function openGuide(s) {
   clearTimeout(gpsCheck);
   gpsCheck = setTimeout(() => { if (!pos.lat || Date.now() - gpsAt > 60000) warn('GPS indisponible : vérifiez la localisation du téléphone. La carte et Google Maps restent utilisables.'); }, 10000);
 }
-function closeGuide() { $('#navView').classList.add('hidden'); navShip = null; cancelAnimationFrame(raf); clearTimeout(navRetry); clearTimeout(gpsCheck); $('#navMap').style.transform = ''; try { speechSynthesis.cancel(); } catch {} }
+function closeGuide() { $('#navView').classList.add('hidden'); navShip = null; cancelAnimationFrame(raf); clearInterval(themeTimer); clearTimeout(navRetry); clearTimeout(gpsCheck); $('#navMap').style.transform = ''; try { speechSynthesis.cancel(); } catch {} }
 $('#navClose').onclick = closeGuide;
 $('#navDeliver').onclick = () => { const s = items.find((x) => x.tracking === navShip?.tracking) || navShip; closeGuide(); if (s) openDeliver(s); };
 // Lecture seule, pour les tests automatiques de l'écran (aucune donnée sensible).
 window.__fenixNav = () => ({
   follow, zoom: navMap?.getZoom(), center: navMap?.getCenter(), me: meMk?.getLatLng(), bearing: follow ? anim.bearing : 0,
   arrowOnScreen: angleDiff(0, anim.arrow - (follow ? anim.bearing : 0)),
-  rotate: $('#navMap').style.transform, line: mainLine ? mainLine.getLatLngs().length : 0, lineOnMap: !!mainLine && navMap.hasLayer(mainLine),
+  rotate: $('#navMap').style.transform, theme, tileStyle: tiles?._url?.includes('dark_all') ? 'dark' : tiles ? 'light' : null, line: mainLine ? mainLine.getLatLngs().length : 0, lineOnMap: !!mainLine && navMap.hasLayer(mainLine),
   straight: !!straight, alts: altLines.length, haveRoad, dist: $('#navDist').textContent, text: $('#navText').textContent,
   warn: $('#navWarn').classList.contains('hidden') ? '' : $('#navWarn').textContent, recenter: !$('#navRecenter').classList.contains('hidden')
 });

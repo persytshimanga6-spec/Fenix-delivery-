@@ -121,6 +121,27 @@ try {
     await shot('guidage-nouvel-itineraire');
   });
 
+  await check('jour / nuit automatique : carte claire le jour, bleu nuit le soir', async () => {
+    mode = 'ok';
+    for (const [iso, want, style] of [['2026-11-27T11:00:00Z', 'day', 'light'], ['2026-11-27T20:30:00Z', 'night', 'dark']]) {
+      const p2 = await ctx.newPage();
+      await p2.clock.setFixedTime(new Date(iso)); // midi puis 21 h 30 à Kinshasa
+      await p2.route('**/api/driver/shipments', (r) => r.fulfill({ json: { shipments: [ship], done_today: 0 } }));
+      await p2.route('**/api/driver/route*', (r) => r.fulfill({ json: ROUTE }));
+      await p2.route(/basemaps\.cartocdn\.com/, (r) => r.fulfill({ status: 204 }));
+      await p2.goto(`${base}/livreur/`); await p2.waitForSelector('[data-a=guide]'); await p2.waitForTimeout(500);
+      await p2.click('[data-a=guide]'); await p2.waitForTimeout(1200);
+      const s = await p2.evaluate(() => window.__fenixNav());
+      assert.equal(s.theme, want); assert.equal(s.tileStyle, style);
+      assert.ok(await p2.locator(`#navWrap.${want}`).count());
+      const bg = await p2.evaluate(() => getComputedStyle(document.querySelector('#navWrap')).backgroundColor);
+      assert.equal(bg, want === 'day' ? 'rgb(207, 230, 247)' : 'rgb(10, 22, 40)');
+      assert.ok(s.lineOnMap, 'route visible');
+      if (process.env.SHOTS) await p2.screenshot({ path: path.join(process.env.SHOTS, `guidage-${want === 'day' ? 'jour' : 'nuit'}.png`) });
+      await p2.close();
+    }
+  });
+
   await check('premier calcul raté : ligne droite + Google Maps, livraison possible', async () => {
     await page.click('#navClose');
     mode = 'dead';

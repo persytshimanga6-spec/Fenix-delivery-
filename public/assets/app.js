@@ -141,11 +141,11 @@ export function quoteLines(q) {
 let tileCfg;
 export function addTiles(map, { dark = false } = {}) {
   tileCfg ??= api('/api/config').then((c) => c.map).catch(() => null);
-  tileCfg.then((m) => {
+  return tileCfg.then((m) => {
     const key = m?.carto_key, style = dark ? 'dark_all' : 'light_all';
     const url = key
       ? `https://basemaps.cartocdn.com/rastertiles/${style}/{z}/{x}/{y}{r}.png?key=${encodeURIComponent(key)}`
       : `https://{s}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}{r}.png`;
-    L.tileLayer(url, { maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>' }).addTo(map);
+    return L.tileLayer(url, { maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>' }).addTo(map);
   });
 }

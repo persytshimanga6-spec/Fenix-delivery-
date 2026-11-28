@@ -1,6 +1,6 @@
 // Tests du guidage (public/assets/nav.js) : instructions en français, panneau qui change, hors route, voix on/off.
 import assert from 'node:assert/strict';
-import { instruction, fmtDist, prepare, progress, createGuide, dist, snap, bearing, angleDiff, OFF_ROUTE_M, OFF_ROUTE_COUNT } from '../public/assets/nav.js';
+import { instruction, fmtDist, prepare, progress, createGuide, dist, snap, bearing, angleDiff, sunTimes, isNight, OFF_ROUTE_M, OFF_ROUTE_COUNT } from '../public/assets/nav.js';
 
 let passed = 0;
 const check = (name, fn) => { fn(); passed++; console.log(`  ✓ ${name}`); };
@@ -76,6 +76,19 @@ try {
     g.replaceRoute(route); g.update(lerp(A, B, 0.32));
     assert.equal(said.length, n);
     assert.ok(g.route); // jamais de « pas de route » pendant le remplacement
+  });
+  check('jour / nuit automatique : selon le soleil à la position, sinon 6 h – 18 h 30', () => {
+    const kin = { lat: -4.32, lng: 15.31 }; // Kinshasa : soleil vers 6 h et 18 h 15 (heure locale = UTC+1) toute l'année
+    const sun = sunTimes(kin.lat, kin.lng, new Date('2026-11-27T12:00:00Z'));
+    const hRise = sun.rise.getUTCHours() + 1 + sun.rise.getUTCMinutes() / 60, hSet = sun.set.getUTCHours() + 1 + sun.set.getUTCMinutes() / 60;
+    assert.ok(hRise > 5.5 && hRise < 6.2, `lever ${hRise}`); assert.ok(hSet > 17.9 && hSet < 18.5, `coucher ${hSet}`);
+    assert.equal(isNight(new Date('2026-11-27T11:00:00Z'), kin), false); // midi à Kinshasa : jour
+    assert.equal(isNight(new Date('2026-11-27T20:30:00Z'), kin), true); // 21 h 30 : nuit
+    const aurora = { lat: 39.73, lng: -104.83 }; // Aurora, 27 nov. : coucher vers 16 h 40 (UTC-7)
+    assert.equal(isNight(new Date('2026-11-28T04:30:00Z'), aurora), true); // 21 h 30, la vidéo du soir
+    assert.equal(isNight(new Date('2026-11-27T19:00:00Z'), aurora), false); // midi
+    const local = (h, m) => { const d = new Date(2026, 10, 27, h, m); return isNight(d); }; // sans position
+    assert.deepEqual([local(5, 59), local(6, 0), local(12, 0), local(18, 29), local(18, 30), local(23, 0)], [true, false, false, false, true, true]);
   });
   check('voix : annonce quand l’instruction change, silence quand coupée', () => {
     const said = [];

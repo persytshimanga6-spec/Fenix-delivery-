@@ -50,6 +50,28 @@ export const fmtKm = (m) => (m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m /
 export const fmtMin = (s) => `${Math.max(1, Math.round(s / 60))} min`;
 export const fmtClock = (date) => date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 
+// ---------- Jour / nuit ----------
+/** Lever et coucher du soleil (UTC) pour une position et un jour — formule simplifiée de la NOAA, précise à ~2 min. */
+export function sunTimes(lat, lng, date = new Date()) {
+  const day = Math.floor((Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) - Date.UTC(date.getUTCFullYear(), 0, 0)) / 864e5);
+  const g = (2 * Math.PI / 365) * (day - 1);
+  const eqt = 229.18 * (0.000075 + 0.001868 * Math.cos(g) - 0.032077 * Math.sin(g) - 0.014615 * Math.cos(2 * g) - 0.040849 * Math.sin(2 * g));
+  const decl = 0.006918 - 0.399912 * Math.cos(g) + 0.070257 * Math.sin(g) - 0.006758 * Math.cos(2 * g) + 0.000907 * Math.sin(2 * g) - 0.002697 * Math.cos(3 * g) + 0.00148 * Math.sin(3 * g);
+  const cosH = (Math.cos(rad(90.833)) - Math.sin(rad(lat)) * Math.sin(decl)) / (Math.cos(rad(lat)) * Math.cos(decl));
+  if (cosH > 1 || cosH < -1) return null; // pôles : pas de lever/coucher ce jour-là
+  const ha = (Math.acos(cosH) * 180) / Math.PI;
+  const midnight = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  const at = (min) => new Date(midnight + min * 60e3);
+  return { rise: at(720 - 4 * (lng + ha) - eqt), set: at(720 - 4 * (lng - ha) - eqt) };
+}
+/** Nuit ? Avec la position : selon le soleil. Sans position : heure du téléphone (jour de 6 h à 18 h 30). */
+export function isNight(date = new Date(), p = null) {
+  const sun = p?.lat != null ? sunTimes(p.lat, p.lng, date) : null;
+  if (sun) return date < sun.rise || date > sun.set;
+  const m = date.getHours() * 60 + date.getMinutes();
+  return m < 6 * 60 || m >= 18 * 60 + 30;
+}
+
 // ---------- Itinéraire et progression ----------
 /** Prépare l'itinéraire du serveur : distances cumulées des points et des étapes. */
 export function prepare(route) {

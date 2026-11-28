@@ -125,11 +125,17 @@ export function project(r, p) {
   return best;
 }
 
-/** Où en est le livreur : prochaine instruction, distance jusqu'au virage, reste, écart à la route. */
-export function progress(r, p) {
-  const { off, along } = project(r, p);
+/**
+ * Où en est le livreur : prochaine instruction, distance jusqu'au virage, reste, écart à la route.
+ * `opts.along` : position déjà connue sur la route (position extrapolée) ; `opts.minK` : étape en cours à ne pas
+ * quitter vers l'arrière (hystérésis : on ne revient en arrière que si l'on est 25 m avant le début de l'étape).
+ */
+export function progress(r, p, opts = {}) {
+  const pr = opts.along != null ? { off: 0, along: opts.along } : project(r, p);
+  const { off, along } = pr;
   let k = 0;
   for (let i = 0; i < r.steps.length; i++) if (r.steps[i].start <= along + 1) k = i;
+  if (opts.minK != null && k < opts.minK && opts.minK < r.steps.length && along > r.steps[opts.minK].start - 25) k = opts.minK;
   const next = r.steps[Math.min(k + 1, r.steps.length - 1)];
   const remaining = Math.max(0, r.total - along);
   const cur = r.steps[k];
@@ -137,8 +143,42 @@ export function progress(r, p) {
   const leftInCur = curLen > 0 ? Math.max(0, ((r.steps[k + 1]?.start ?? r.total) - along) / curLen) : 0;
   const remainingS = (cur.duration || 0) * leftInCur + r.steps.slice(k + 1).reduce((t, s) => t + (s.duration || 0), 0);
   return {
-    step: k + 1 < r.steps.length ? k + 1 : k, text: next.text, road: cur.type === 'arrive' ? '' : cur.name || '', toTurn: Math.max(0, next.start - along),
-    remaining, remainingS, offRoute: off, arrived: remaining < 30
+    k, step: k + 1 < r.steps.length ? k + 1 : k, text: next.text, road: cur.type === 'arrive' ? '' : cur.name || '', toTurn: Math.max(0, next.start - along),
+    along, remaining, remainingS, offRoute: off, arrived: remaining < 30
+  };
+}
+
+/**
+ * Suivi en temps réel entre deux positions GPS (« dead reckoning ») : la flèche avance LE LONG DE LA ROUTE
+ * avec la dernière vitesse connue ; un nouveau GPS corrige en douceur, sans saut ni recul pour un petit écart.
+ */
+export const SNAP_M = 35, MAX_EXTRAPOLATE_S = 6;
+export function createTracker({ now = () => Date.now() } = {}) {
+  let last = null, shown = null, shownAt = 0;
+  return {
+    reset() { last = null; shown = null; },
+    get fix() { return last; },
+    /** Un vrai GPS. Renvoie la position collée sur la route (ou null si le livreur est loin de la route). */
+    fix(r, p, speed = 0) {
+      const sn = snap(r, p);
+      if (sn.off > SNAP_M) { last = null; shown = null; return null; }
+      last = { along: sn.along, speed: Math.max(0, speed || 0), at: now() };
+      return sn;
+    },
+    /** Position estimée maintenant (à appeler à chaque image). */
+    position(r) {
+      if (!last) return null;
+      const t = now();
+      const dt = Math.min(MAX_EXTRAPOLATE_S, Math.max(0, (t - last.at) / 1000));
+      const target = Math.min(r.total, last.along + last.speed * dt);
+      if (shown == null) shown = target;
+      else {
+        const d = target - shown, alpha = 1 - Math.exp(-Math.max(0, t - shownAt) / 250);
+        if (!(d < 0 && d > -15)) shown += d * alpha; // petit recul (GPS un peu en retard) : la flèche attend, elle ne recule pas
+      }
+      shownAt = t;
+      return { ...pointAt(r, shown), along: shown };
+    }
   };
 }
 
@@ -146,27 +186,36 @@ export function progress(r, p) {
  * Contrôleur du guidage : suit les positions, annonce les instructions (voix), demande un nouvel itinéraire
  * quand le livreur quitte la route. `speak` et `reroute` sont fournis par l'écran (ou par les tests).
  */
-// Hors de la route : plus de 80 m, trois positions de suite (le bruit du GPS en voiture ne déclenche rien).
-export const OFF_ROUTE_M = 80, OFF_ROUTE_COUNT = 3, REROUTE_EVERY_MS = 20000;
+// Hors de la route : plus de 50 m sur deux vrais GPS de suite ; nouvel itinéraire au plus toutes les 10 s.
+export const OFF_ROUTE_M = 50, OFF_ROUTE_COUNT = 2, REROUTE_EVERY_MS = 10000;
 export function createGuide({ speak = () => {}, reroute = () => {}, now = () => Date.now() } = {}) {
-  let route = null, lastStep = -1, nearSaid = -1, offCount = 0, lastReroute = 0, voice = true, quiet = null;
+  let route = null, lastStep = -1, nearSaid = -1, offCount = 0, lastReroute = 0, voice = true, quiet = null, floor = 0;
   return {
-    setRoute(r) { route = r ? prepare(r) : null; lastStep = -1; nearSaid = -1; offCount = 0; return route; },
+    setRoute(r) { route = r ? prepare(r) : null; lastStep = -1; nearSaid = -1; offCount = 0; floor = 0; return route; },
     /** Nouvel itinéraire après un recalcul : on ne répète pas la consigne si elle n'a pas changé. */
     replaceRoute(r) {
       quiet = route && lastStep >= 0 && lastStep !== Infinity ? route.steps[lastStep]?.text : null;
-      route = prepare(r); offCount = 0; nearSaid = -1; lastStep = -1;
+      route = prepare(r); offCount = 0; nearSaid = -1; lastStep = -1; floor = 0;
       return route;
     },
     get route() { return route; },
     get voice() { return voice; },
     setVoice(on) { voice = !!on; },
-    update(p) {
+    /**
+     * `p` : position ; `opts.along` : position estimée sur la route (entre deux GPS). Les positions estimées
+     * mettent à jour bandeau et voix, mais seuls les vrais GPS (sans `along`) comptent pour le hors-route.
+     */
+    update(p, opts = {}) {
       if (!route || !p?.lat) return null;
-      const g = progress(route, p);
-      // Hors de la route : nouvel itinéraire calculé depuis la vraie position, au plus toutes les 20 s.
-      offCount = g.offRoute > OFF_ROUTE_M ? offCount + 1 : 0;
-      if (offCount >= OFF_ROUTE_COUNT && now() - lastReroute > REROUTE_EVERY_MS) { lastReroute = now(); offCount = 0; reroute(p); g.rerouting = true; }
+      const estimated = opts.along != null;
+      const g = progress(route, p, { along: opts.along, minK: floor });
+      if (g.offRoute < OFF_ROUTE_M) floor = Math.max(floor, g.k);
+      if (!estimated) {
+        // Hors de la route : nouvel itinéraire calculé depuis la vraie position.
+        offCount = g.offRoute > OFF_ROUTE_M ? offCount + 1 : 0;
+        if (offCount >= OFF_ROUTE_COUNT && now() - lastReroute > REROUTE_EVERY_MS) { lastReroute = now(); offCount = 0; reroute(p); g.rerouting = true; }
+        if (g.offRoute > OFF_ROUTE_M) return g; // loin de la route : on ne lit pas une consigne périmée
+      }
       if (voice && !g.rerouting) {
         if (g.arrived && lastStep !== Infinity) { speak('Vous êtes arrivé à destination'); lastStep = Infinity; }
         else if (!g.arrived && g.step !== lastStep && quiet && g.text === quiet) { lastStep = g.step; }

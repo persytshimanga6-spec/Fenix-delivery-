@@ -1,6 +1,6 @@
 // Tests du guidage (public/assets/nav.js) : instructions en français, panneau qui change, hors route, voix on/off.
 import assert from 'node:assert/strict';
-import { instruction, fmtDist, prepare, progress, createGuide, dist, snap, bearing, angleDiff, sunTimes, isNight, OFF_ROUTE_M, OFF_ROUTE_COUNT } from '../public/assets/nav.js';
+import { instruction, fmtDist, prepare, progress, createGuide, dist, snap, bearing, angleDiff, sunTimes, isNight, createTracker, OFF_ROUTE_M, OFF_ROUTE_COUNT, REROUTE_EVERY_MS } from '../public/assets/nav.js';
 
 let passed = 0;
 const check = (name, fn) => { fn(); passed++; console.log(`  ✓ ${name}`); };
@@ -36,20 +36,52 @@ try {
     assert.ok(g1.remaining > g2.remaining && g1.remainingS > g2.remainingS);
     assert.ok(progress(r, C).arrived);
   });
-  check('hors de la route : nouvel itinéraire demandé (une seule fois en 20 s), pas sur le bruit du GPS', () => {
+  check('virage raté : nouvel itinéraire dès 2 GPS à plus de 50 m (au plus toutes les 10 s), pas sur le bruit du GPS', () => {
     let t = 1e6, reroutes = 0;
     const g = createGuide({ reroute: () => reroutes++, now: () => t });
     g.setRoute(route);
-    assert.equal(OFF_ROUTE_M, 80); assert.equal(OFF_ROUTE_COUNT, 3);
-    const noisy = { lat: A.lat + 0.0006, lng: A.lng + 0.002 }; // ~65 m à côté : bruit GPS
+    assert.equal(OFF_ROUTE_M, 50); assert.equal(OFF_ROUTE_COUNT, 2); assert.equal(REROUTE_EVERY_MS, 10000);
+    const noisy = { lat: A.lat + 0.0003, lng: A.lng + 0.002 }; // ~33 m à côté : bruit GPS
     for (let i = 0; i < 6; i++) g.update(noisy);
     assert.equal(reroutes, 0);
     const far = { lat: A.lat + 0.003, lng: A.lng + 0.002 }; // ~330 m à côté de la route (autre rue)
-    g.update(far); g.update(far); assert.equal(reroutes, 0);
+    g.update(far); assert.equal(reroutes, 0);
     assert.ok(g.update(far).rerouting); assert.equal(reroutes, 1);
     g.update(far); g.update(far); assert.equal(reroutes, 1);
-    t += 21000; g.update(far); g.update(far); g.update(far); assert.equal(reroutes, 2);
+    t += 10500; g.update(far); g.update(far); assert.equal(reroutes, 2);
     g.update(lerp(A, B, 0.2)); assert.equal(reroutes, 2);
+    // les positions estimées (entre deux GPS) ne déclenchent jamais de recalcul
+    t += 20000; for (let i = 0; i < 5; i++) g.update(far, { along: 100 }); assert.equal(reroutes, 2);
+  });
+  check('temps réel : entre deux GPS la flèche avance le long de la route, « dans X m » descend chaque seconde', () => {
+    let t = 0;
+    const tr = createTracker({ now: () => t });
+    const r = prepare(route);
+    const g = createGuide({ now: () => t });
+    g.setRoute(route);
+    tr.fix(r, lerp(A, B, 0.2), 11); // GPS à 120 m du départ, 11 m/s ≈ 40 km/h, puis plus de GPS pendant 4 s
+    const seen = [];
+    for (let ms = 0; ms <= 4000; ms += 50) { t = ms; const p = tr.position(r); if (ms % 1000 === 0) seen.push(Math.round(g.update(p, { along: p.along }).toTurn)); }
+    for (let i = 1; i < seen.length; i++) assert.ok(seen[i] < seen[i - 1] - 5, `descend chaque seconde : ${seen}`);
+    assert.ok(Math.abs(seen[0] - 480) < 15 && Math.abs(seen[4] - 436) < 15, `${seen}`);
+    // le GPS suivant arrive un peu derrière : pas de recul de la flèche
+    const before = tr.position(r).along;
+    tr.fix(r, lerp(A, B, 0.2 + 40 / 600), 11); // 160 m alors que l'estimation est à ~164 m
+    t += 50; assert.ok(tr.position(r).along >= before - 0.01, 'pas de recul');
+    // arrêt (vitesse 0) : la flèche s'arrête aussi ; plus de 6 s sans GPS : on n'invente plus
+    tr.fix(r, lerp(A, B, 0.5), 0); t += 3000; const stop = tr.position(r).along; t += 2000; assert.ok(Math.abs(tr.position(r).along - stop) < 0.5);
+    tr.fix(r, lerp(A, B, 0.5), 10); t += 20000; assert.ok(tr.position(r).along < 300 + 10 * 6 + 1);
+    assert.equal(tr.fix(r, { lat: A.lat + 0.003, lng: A.lng }, 10), null); // loin de la route : pas d'estimation
+  });
+  check('changement de consigne immédiat au virage, sans retour en arrière (hystérésis)', () => {
+    const r = prepare(route);
+    const g = createGuide({});
+    g.setRoute(route);
+    assert.match(g.update(lerp(A, B, 0.99)).text, /droite/);
+    assert.match(g.update(lerp(B, C, 0.02), { along: 612 }).text, /arrivé/); // 12 m après le virage : consigne suivante
+    assert.match(g.update(lerp(A, B, 0.995), { along: 597 }).text, /arrivé/); // le GPS repasse 3 m avant : on ne revient pas
+    assert.match(g.update(lerp(A, B, 0.8), { along: 480 }).text, /droite/); // vraiment avant le virage : oui
+    assert.ok(r.total > 1190);
   });
   check('la distance au virage défile à chaque position, puis la consigne suivante arrive aussitôt', () => {
     const r = prepare(route);

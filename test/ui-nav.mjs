@@ -121,6 +121,63 @@ try {
     await shot('guidage-nouvel-itineraire');
   });
 
+  // ----- Temps réel : on roule vers l'est sur le Boulevard (A → B), virage à droite en B -----
+  const M = (B[1] - A[1]) / 599.4; // degrés de longitude par mètre ici
+  const atM = (m) => (m <= 599.4 ? [A[0], A[1] + m * M] : [A[0], B[1] + (m - 599.4) * M]); // tout droit, même après B (virage raté)
+  const atTurnM = (m) => (m <= 599.4 ? atM(m) : [A[0] - (m - 599.4) / 110574, B[1]]); // en tournant à droite en B
+  async function drive({ from, speed, seconds, every, path = atTurnM, sample = 250 }) {
+    await page.click('#navClose').catch(() => {});
+    await ctx.setGeolocation({ latitude: path(from)[0], longitude: path(from)[1] });
+    await page.waitForTimeout(300);
+    await page.click('[data-a=guide]'); await page.waitForTimeout(1500);
+    const out = []; const t0 = Date.now(); let nextFix = 0;
+    while (Date.now() - t0 < seconds * 1000) {
+      const t = (Date.now() - t0) / 1000;
+      if (t >= nextFix) { const p = path(from + speed * nextFix); await ctx.setGeolocation({ latitude: p[0], longitude: p[1] }); nextFix += every; }
+      const s = await st();
+      out.push({ t, truth: from + speed * t, dist: s.dist, text: s.text, me: s.me, calls });
+      await page.waitForTimeout(sample);
+    }
+    return out;
+  }
+  const meters = (txt) => (/maintenant/.test(txt) ? 0 : /km/.test(txt) ? parseFloat(txt.replace(/[^\d,]/g, '').replace(',', '.')) * 1000 : parseInt(txt.replace(/\D/g, ''), 10));
+  const everySecond = (out, until, startSec = 2) => {
+    const pts = []; for (let sec = startSec; sec <= until; sec++) { const o = out.find((x) => x.t >= sec); if (o) pts.push(o); }
+    return pts;
+  };
+
+  await check('temps réel, 1 GPS/s : « dans X m » descend chaque seconde, la flèche ne s’arrête jamais, consigne suivante dans la seconde', async () => {
+    mode = 'ok';
+    const out = await drive({ from: 450, speed: 12, seconds: 16, every: 1 });
+    const before = everySecond(out, 11).filter((o) => o.truth < 590);
+    const d = before.map((o) => meters(o.dist));
+    for (let i = 1; i < d.length; i++) assert.ok(d[i] < d[i - 1], `descend chaque seconde : ${d}`);
+    const moving = out.filter((o) => o.t > 2 && o.truth < 590);
+    for (let i = 1; i < moving.length; i++) assert.ok(moving[i].me.lng > moving[i - 1].me.lng, `la flèche avance toujours (${i})`);
+    const passed = out.find((o) => o.truth >= 599.4 + 12); // une seconde après le virage
+    const later = out.filter((o) => o.t >= passed.t);
+    assert.ok(later.length && /arrivé/.test(later[0].text), `consigne suivante : ${later[0]?.text}`);
+  });
+
+  await check('temps réel, 1 GPS toutes les 4 s : la distance descend QUAND MÊME chaque seconde (estimation)', async () => {
+    // la vitesse est connue au 2e GPS (t = 4 s) ; ensuite seulement un GPS toutes les 4 s
+    const out = await drive({ from: 250, speed: 12, seconds: 17, every: 4 });
+    const d = everySecond(out, 16, 5).map((o) => meters(o.dist));
+    for (let i = 1; i < d.length; i++) assert.ok(d[i] < d[i - 1], `descend chaque seconde entre deux GPS : ${d}`);
+    console.log(`    (GPS toutes les 4 s, bandeau seconde par seconde : ${d.join(' → ')} m)`);
+    const err = everySecond(out, 16, 5).map((o) => Math.abs((599.4 - o.truth) - meters(o.dist)));
+    assert.ok(Math.max(...err) < 40, `écart avec la vraie distance : ${err.map(Math.round)}`);
+  });
+
+  await check('virage raté volontaire : nouvel itinéraire en moins de 10 s', async () => {
+    const out = await drive({ from: 520, speed: 12, seconds: 18, every: 1, path: atM });
+    const passT = (599.4 - 520) / 12;
+    const c0 = out.find((o) => o.t >= passT).calls;
+    const got = out.find((o) => o.t > passT && o.calls > c0);
+    assert.ok(got, 'recalcul demandé');
+    console.log(`    (nouvel itinéraire demandé ${(got.t - passT).toFixed(1)} s après le virage raté)`); assert.ok(got.t - passT < 10, `recalcul ${(got.t - passT).toFixed(1)} s après le virage`);
+  });
+
   await check('jour / nuit automatique : carte claire le jour, bleu nuit le soir', async () => {
     mode = 'ok';
     for (const [iso, want, style] of [['2026-11-27T11:00:00Z', 'day', 'light'], ['2026-11-27T20:30:00Z', 'night', 'dark']]) {

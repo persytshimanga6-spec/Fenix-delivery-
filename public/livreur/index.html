@@ -159,7 +159,7 @@ header.d{padding:calc(14px + var(--sat)) 16px 14px;display:flex;justify-content:
 <script src="/vendor/html5-qrcode/html5-qrcode.min.js"></script>
 <script type="module">
 import { $, $$, api, esc, fc, toast, run, pills, requireLogin, logout, PAY, addTiles } from '/assets/app.js';
-import { createGuide, fmtDist, fmtKm, fmtMin, fmtClock, dist, bearing, angleDiff, snap, isNight, OFF_ROUTE_M } from '/assets/nav.js';
+import { createGuide, createTracker, fmtDist, fmtKm, fmtMin, fmtClock, dist, bearing, angleDiff, snap, isNight, SNAP_M } from '/assets/nav.js';
 const cfg = await api('/api/config');
 $$('[data-company]').forEach((e) => (e.textContent = cfg.company));
 // Dans l'appli mobile « Fenix Livreur » (Capacitor), on utilise le GPS et le scanner du téléphone.
@@ -203,14 +203,26 @@ addEventListener('offline', netState);
 // ---------- Position GPS (partagée tant que l'appli est ouverte : sert au suivi et à l'organisation des livreurs) ----------
 async function watchGps() {
   const onPos = (p) => { if (p?.coords) { pos = { lat: p.coords.latitude, lng: p.coords.longitude }; gpsAt = Date.now(); navOnGps(p.coords); } };
+  // Guidage temps réel : un GPS par seconde (Android en donne un toutes les 5 s par défaut).
+  const opts = { enableHighAccuracy: true, maximumAge: 0, timeout: 10000, interval: 1000, minimumUpdateInterval: 500 };
   if (NATIVE && Native.Geolocation) {
     try {
       await Native.Geolocation.requestPermissions();
-      await Native.Geolocation.watchPosition({ enableHighAccuracy: true, maximumAge: 1000 }, (p) => onPos(p));
+      await Native.Geolocation.watchPosition(opts, (p) => onPos(p));
     } catch { toast('Activez la localisation pour Fenix Livreur', true); }
   } else if (navigator.geolocation) {
-    navigator.geolocation.watchPosition(onPos, () => {}, { enableHighAccuracy: true, maximumAge: 1000 });
+    navigator.geolocation.watchPosition(onPos, () => {}, opts);
   }
+  // Complément pendant le guidage : si le dernier GPS a plus d'une seconde, on en redemande un.
+  let asking = false;
+  setInterval(async () => {
+    if (!isOpen() || asking || Date.now() - gpsAt < 1000) return;
+    asking = true;
+    try {
+      if (NATIVE && Native.Geolocation) onPos(await Native.Geolocation.getCurrentPosition({ enableHighAccuracy: true, maximumAge: 0, timeout: 2000 }));
+      else await new Promise((ok) => navigator.geolocation?.getCurrentPosition((p) => { onPos(p); ok(); }, ok, { enableHighAccuracy: true, maximumAge: 0, timeout: 2000 }) ?? ok());
+    } catch { /* le suivant */ } finally { asking = false; }
+  }, 1000);
   setInterval(() => {
     if (pos.lat && navigator.onLine) api('/api/driver/location', { method: 'POST', body: pos }).catch(() => {});
   }, 60000);
@@ -287,7 +299,8 @@ const ALT = { color: '#8A8F98', weight: 5, opacity: 0.75, lineCap: 'round' };
 let gpsAt = 0, gps = null, prevFix = null;
 let navShip = null, navMap = null, mainLine = null, altLines = [], straight = null, meMk = null, arrowEl = null;
 let navRoute = null, alts = [], haveRoad = false, follow = true, routeBusy = false, navRetry = null, gpsCheck = null, raf = 0;
-let tiles = null, theme = null, themeTimer = null;
+let tiles = null, theme = null, themeTimer = null, lastPanel = 0;
+const tracker = createTracker();
 const anim = { from: null, to: null, cur: null, t0: 0, dur: 1000, heading: 0, arrow: 0, bearingTo: 0, bearing: 0 };
 const ARROW = (t) => /demi-tour/.test(t) ? '↶' : /légèrement à gauche/.test(t) ? '↖' : /légèrement à droite/.test(t) ? '↗' : /gauche/.test(t) ? '←'
   : /droite/.test(t) ? '→' : /rond-point/i.test(t) ? '⟳' : /arrivé/.test(t) ? '◎' : '↑';
@@ -354,7 +367,7 @@ async function fetchRoute(reason = 'first') {
   } finally { routeBusy = false; }
 }
 function applyRoute(r) {
-  navRoute = r; alts = (r.alternatives || []).filter((a) => a?.coords?.length > 1);
+  navRoute = r; alts = (r.alternatives || []).filter((a) => a?.coords?.length > 1); tracker.reset();
   if (haveRoad) guide.replaceRoute(r); else guide.setRoute(r);
   haveRoad = true;
   // La ligne est mise à jour sur place : elle ne disparaît jamais entre l'ancienne et la nouvelle route.
@@ -370,7 +383,7 @@ function drawAlts() {
 function chooseAlt(i) {
   const pick = alts[i]; if (!pick) return;
   alts[i] = { ...navRoute, alternatives: undefined };
-  navRoute = pick; guide.replaceRoute(pick); mainLine.setLatLngs(pick.coords); drawAlts();
+  navRoute = pick; tracker.reset(); guide.replaceRoute(pick); mainLine.setLatLngs(pick.coords); drawAlts();
   toast(`Itinéraire choisi : ${fmtKm(pick.distance)} · ${fmtMin(pick.duration)}`);
   if (gps) navOnGps(null);
 }
@@ -382,11 +395,13 @@ function drawStraight(from) {
   $('#navDist').textContent = fmtKm(dist(from, dest())); $('#navRoad').textContent = '';
 }
 
-// ----- Position du livreur -----
+// ----- Position du livreur : vrais GPS (environ 1 par seconde) -----
 function navOnGps(c) {
   if (!isOpen()) return;
   if (c) {
     const p = { lat: c.latitude, lng: c.longitude }, now = Date.now();
+    // Même point que le GPS précédent (demande en double) : ignoré, sauf arrêt prolongé.
+    if (prevFix && p.lat === prevFix.lat && p.lng === prevFix.lng && !Number.isFinite(c.speed) && now - prevFix.at < 4500) return;
     let speed = Number.isFinite(c.speed) ? c.speed : null;
     if (speed === null && prevFix) { const dt = (now - prevFix.at) / 1000; if (dt > 0.2) speed = dist(prevFix, p) / dt; }
     let heading = Number.isFinite(c.heading) && (speed ?? 0) > MOVING ? c.heading : null;
@@ -400,14 +415,18 @@ function navOnGps(c) {
   const moving = gps.speed > MOVING;
   let show = gps, head = gps.heading ?? anim.heading;
   if (guide.route) {
-    const sn = snap(guide.route, gps);
-    if (sn.off < OFF_ROUTE_M) { show = sn; if (moving || gps.heading == null) head = sn.bearing; } // flèche collée à la ligne
-    if (alts.length && sn.along > 250) { alts = []; drawAlts(); } // les autres routes ne servent qu'au départ
+    const sn = tracker.fix(guide.route, gps, gps.speed); // la flèche avancera le long de la route jusqu'au GPS suivant
+    if (sn) { show = sn; if (moving || gps.heading == null) head = sn.bearing; }
+    if (alts.length && sn && sn.along > 250) { alts = []; drawAlts(); } // les autres routes ne servent qu'au départ
+    const g = guide.update(gps); // vrai GPS : hors-route et recalcul
+    if (g?.rerouting) warn('Nouvel itinéraire…');
+    if (!sn && g) panel(g); // loin de la route : pas d'estimation
   }
   moveTo(show, head, moving);
-  if (!guide.route) { if (straight) drawStraight(gps); return; }
-  const g = guide.update(gps);
-  if (!g) return;
+  if (!guide.route && straight) drawStraight(gps);
+}
+function panel(g) {
+  if (g.offRoute > SNAP_M && !g.rerouting) { $('#navRoad').textContent = ''; return; }
   if (g.arrived) {
     $('#navArrow').textContent = '◎'; $('#navDist').textContent = 'Arrivé'; $('#navText').textContent = 'Demandez le code au client';
   } else {
@@ -415,10 +434,9 @@ function navOnGps(c) {
   }
   $('#navRoad').textContent = g.road || '';
   $('#navEta').firstChild.textContent = `${fmtClock(new Date(Date.now() + g.remainingS * 1000))} · ${fmtMin(g.remainingS)} · ${fmtKm(g.remaining)}`;
-  if (g.rerouting) warn('Nouvel itinéraire…');
 }
 
-// ----- Animation : la flèche avance en douceur, la carte suit et tourne -----
+// ----- Animation : la flèche ne s'arrête jamais ; bandeau, distance et heure d'arrivée recalculés en continu -----
 function moveTo(p, head, moving) {
   anim.from = anim.cur || p; anim.to = { lat: p.lat, lng: p.lng }; anim.t0 = performance.now();
   anim.heading = head ?? anim.heading;
@@ -428,10 +446,18 @@ function frame() {
   if (!isOpen()) return;
   raf = requestAnimationFrame(frame);
   if (!anim.to || !navMap) return;
-  const k = Math.min(1, (performance.now() - anim.t0) / anim.dur);
-  anim.cur = { lat: anim.from.lat + (anim.to.lat - anim.from.lat) * k, lng: anim.from.lng + (anim.to.lng - anim.from.lng) * k };
-  anim.bearing = (anim.bearing + angleDiff(anim.bearing, anim.bearingTo) * 0.08 + 360) % 360;
-  anim.arrow = (anim.arrow + angleDiff(anim.arrow, anim.heading) * 0.15 + 360) % 360;
+  const est = guide.route ? tracker.position(guide.route) : null;
+  if (est) {
+    // Sur la route : position estimée maintenant (dernier GPS + vitesse × temps), le long de la ligne.
+    anim.cur = { lat: est.lat, lng: est.lng };
+    if (gps?.speed > MOVING) { anim.heading = est.bearing; anim.bearingTo = est.bearing; }
+    if (performance.now() - lastPanel >= 200) { lastPanel = performance.now(); panel(guide.update(est, { along: est.along })); }
+  } else {
+    const k = Math.min(1, (performance.now() - anim.t0) / anim.dur);
+    anim.cur = { lat: anim.from.lat + (anim.to.lat - anim.from.lat) * k, lng: anim.from.lng + (anim.to.lng - anim.from.lng) * k };
+  }
+  anim.bearing = (anim.bearing + angleDiff(anim.bearing, anim.bearingTo) * 0.2 + 360) % 360;
+  anim.arrow = (anim.arrow + angleDiff(anim.arrow, anim.heading) * 0.3 + 360) % 360;
   const b = follow ? anim.bearing : 0;
   meMk.setLatLng([anim.cur.lat, anim.cur.lng]);
   if (arrowEl) arrowEl.style.transform = `rotate(${anim.arrow}deg)`; // la carte tourne déjà de -cap : la flèche pointe vers le haut
@@ -452,7 +478,7 @@ $('#navZoomOut').onclick = () => navMap?.setZoom(Math.max(11, navMap.getZoom() -
 
 const ME = '<div class="nav-me"><svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17" fill="#3B82F6" stroke="#fff" stroke-width="3"/><path d="M20 8 L29 29 L20 24 L11 29 Z" fill="#fff"/></svg></div>';
 function openGuide(s) {
-  navShip = s; navRoute = null; alts = []; haveRoad = false; routeBusy = false; guide.setRoute(null); follow = true; prevFix = null;
+  navShip = s; navRoute = null; alts = []; haveRoad = false; tracker.reset(); routeBusy = false; guide.setRoute(null); follow = true; prevFix = null;
   gps = pos.lat ? { lat: pos.lat, lng: pos.lng, speed: 0, heading: null } : null;
   $('#navView').classList.remove('hidden'); $('#navRecenter').classList.add('hidden');
   $('#navWho').textContent = `${s.recipient_name} · ${s.to_commune}${s.to_landmark ? ` · ${s.to_landmark}` : ''}`;
